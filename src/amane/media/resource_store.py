@@ -8,7 +8,9 @@
 import asyncio
 import hashlib
 import mimetypes
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
@@ -21,7 +23,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from ..db.models import Resource
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import AsyncGenerator, Awaitable, Callable
 
     from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -76,6 +78,12 @@ class AcquireResult:
     failed: list[str] | None = None
 
 
+@dataclass
+class _LockEntry:
+    lock: asyncio.Lock
+    waiters: int = 0
+
+
 @dataclass(frozen=True)
 class ResolvedSource:
     """处理入口的源解析结果: 底层 locator 与本地文件."""
@@ -84,14 +92,42 @@ class ResolvedSource:
     path: Path
 
 
+class UpscaleOutcome(StrEnum):
+    """``SKIPPED`` 表示盘上已是记录所指的那份字节, 调用方不应计作失败."""
+
+    UPSCALED = "upscaled"
+    SKIPPED = "skipped"
+    FAILED = "failed"
+
+
 class ResourceStore:
     def __init__(self, engine: AsyncEngine, base_dir: Path):
         self._engine = engine
         self._base_dir = base_dir
+        self._guards: dict[str, _LockEntry] = {}
+        self._guards_lock = asyncio.Lock()
         base_dir.mkdir(parents=True, exist_ok=True)
 
     def _session(self) -> AsyncSession:
         return AsyncSession(self._engine, expire_on_commit=False)
+
+    @asynccontextmanager
+    async def _serialized(self, locator: str) -> AsyncGenerator[None]:
+        """按 locator 串行内容写入; 无人在用时回收条目, 长跑的进程不积累锁."""
+        async with self._guards_lock:
+            entry = self._guards.get(locator)
+            if entry is None:
+                entry = _LockEntry(asyncio.Lock())
+                self._guards[locator] = entry
+            entry.waiters += 1
+        try:
+            async with entry.lock:
+                yield
+        finally:
+            async with self._guards_lock:
+                entry.waiters -= 1
+                if entry.waiters == 0:
+                    del self._guards[locator]
 
     def _compute_path(self, url: str, ext: str | None = None) -> Path:
         h = _url_hash(url)
@@ -136,7 +172,13 @@ class ResourceStore:
             found = await self.get_by_url_hash(internal)
             return found[1] if found else None
 
-        # 缓存命中且文件存在则直出.
+        # 同一 URL 的内容写入串行: 一起到达的调用都判缓存未命中, 若各自下载并改名到同一路径,
+        # 后写会覆盖先写 (含先写方刚做完的就地超分), 而先写方的记录仍然作数.
+        async with self._serialized(url):
+            return await self._acquire_locked(url, client)
+
+    async def _acquire_locked(self, url: str, client: WebClient) -> Path | None:
+        # 缓存命中且文件存在则直出. 判据是记录 + 文件存在, 不看哈希: 超分是就地覆盖, 哈希每次都会变.
         cached = await self.resolve(url)
         if cached:
             return cached
@@ -153,9 +195,8 @@ class ResourceStore:
         # 下载. 失败可能是站点拦下指纹 (403/406, 见 net/http.py 的轮换), 也可能是上游本来就没有图;
         # 两种失败都不写资源记录, 这里给出资源层的告警, 与上游的请求级日志区分开.
         #
-        # dest 只由 URL 决定, 而获取不按 URL 串行: 就地写 dest 再在失败时删掉它,
-        # 会删掉并发调用刚写好的完整文件. 因此先写调用独享的临时文件 (分块下载失败留下的残片也在其中),
-        # 成功后再原子改名到 dest, 失败只清理临时文件, 不触碰 dest.
+        # 临时文件按调用命名, 分块下载失败留下的残片只落在其中; 成功后原子改名到 dest, 失败只清理
+        # 临时文件, 不触碰 dest (dest 只由 URL 决定, 而这里已按 URL 串行, 改名不会被并发写覆盖).
         # 临时文件保留原扩展名: download 的实现可能按扩展名决定写出的格式.
         tmp = dest.with_name(f"{dest.stem}.{uuid4().hex}.part{dest.suffix}")
         try:
@@ -166,7 +207,7 @@ class ResourceStore:
         finally:
             tmp.unlink(missing_ok=True)
 
-        size = dest.stat().st_size if dest.exists() else None
+        size = dest.stat().st_size
         mime = mimetypes.guess_type(str(dest))[0]
         content_hash = self._hash_file(dest)
 
@@ -236,89 +277,101 @@ class ResourceStore:
         *,
         ext: str = ".jpg",
     ) -> Resource | None:
-        # 同 (src_url, op, args) 命中已有记录直出. producer 失败返回 None.
+        # 同 (src_url, op, args) 命中已有记录且磁盘仍是记录的那份字节则直出. producer 失败返回 None.
         locator = derived_locator(src_url, op, args)
-        existing = await self.get_by_url(locator)
-        if existing is not None and (self._base_dir / existing.file_path).exists():
-            return existing
-
         dest = self._compute_path(locator, ext=ext)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        ok = await producer(dest)
-        if not ok or not dest.exists():
-            logger.warning("derived producer failed", src=src_url, op=op, args=args)
-            return None
-
-        size = dest.stat().st_size
-        mime = mimetypes.guess_type(str(dest))[0]
-        content_hash = self._hash_file(dest)
-        meta = {"op": op, "src": src_url, "args": args}
-
-        async with self._session() as session:
-            if existing is not None:
-                existing.file_path = self._relative_path(dest)
-                existing.content_hash = content_hash
-                existing.size = size
-                existing.mime_type = mime
-                existing.meta = meta
-                session.add(existing)
-                await session.commit()
+        async with self._serialized(locator):
+            existing = await self.get_by_url(locator)
+            if existing is not None and self._matches_record(self.full_path(existing), existing):
                 return existing
-            record = Resource(
-                url=locator,
-                file_path=self._relative_path(dest),
-                content_hash=content_hash,
-                size=size,
-                mime_type=mime,
-                meta=meta,
-            )
-            session.add(record)
-            await session.commit()
-            return record
+
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            ok = await producer(dest)
+            if not ok or not dest.exists():
+                logger.warning("derived producer failed", src=src_url, op=op, args=args)
+                return None
+
+            size = dest.stat().st_size
+            mime = mimetypes.guess_type(str(dest))[0]
+            content_hash = self._hash_file(dest)
+            meta = {"op": op, "src": src_url, "args": args}
+
+            async with self._session() as session:
+                if existing is not None:
+                    existing.file_path = self._relative_path(dest)
+                    existing.content_hash = content_hash
+                    existing.size = size
+                    existing.mime_type = mime
+                    existing.meta = meta
+                    session.add(existing)
+                    await session.commit()
+                    return existing
+                record = Resource(
+                    url=locator,
+                    file_path=self._relative_path(dest),
+                    content_hash=content_hash,
+                    size=size,
+                    mime_type=mime,
+                    meta=meta,
+                )
+                session.add(record)
+                await session.commit()
+                return record
 
     async def upscale_in_place(
         self,
         resource: Resource,
         sr_args: dict,
         producer: Callable[[Path, Path], Awaitable[bool]],
-    ) -> bool:
-        # URL 不变. meta 已含 sr 则跳过 (定时任务去重亦依赖此).
-        if resource.meta and "sr" in resource.meta:
-            return False
-        src = self._base_dir / resource.file_path
-        if not src.exists():
-            logger.warning("upscale source missing", url=resource.url, path=str(src))
-            return False
-
-        tmp = src.with_name(f"{src.stem}.sr_tmp{src.suffix}")
-        try:
-            ok = await producer(src, tmp)
-            if not ok or not tmp.exists():
-                logger.warning("upscale producer failed", url=resource.url)
-                tmp.unlink(missing_ok=True)
-                return False
-            tmp.replace(src)
-        except Exception as e:
-            logger.warning("upscale in place error", url=resource.url, error=str(e))
-            tmp.unlink(missing_ok=True)
-            return False
-
-        size = src.stat().st_size
-        content_hash = self._hash_file(src)
-        new_meta = dict(resource.meta) if resource.meta else {}
-        new_meta["sr"] = sr_args
-
-        async with self._session() as session:
-            result = await session.exec(select(Resource).where(Resource.url == resource.url))
-            record = result.first()
+    ) -> UpscaleOutcome:
+        """``sr`` 标记的判据是该标记所指的那份字节仍在盘上; 磁盘已被换掉时按未超分处理, 重跑后重新
+        记录 — 标记与内容因此不会永久不一致.
+        """
+        async with self._serialized(resource.url):
+            # 调用方的 Resource 可能已过期 (并发调用刚改过), 标记与哈希一律按锁内重读的行判定.
+            async with self._session() as session:
+                result = await session.exec(select(Resource).where(Resource.url == resource.url))
+                record = result.first()
             if record is None:
-                return False
-            record.size = size
-            record.content_hash = content_hash
-            record.meta = new_meta
-            session.add(record)
-            await session.commit()
-        return True
+                return UpscaleOutcome.SKIPPED
+            src = self._base_dir / record.file_path
+            if not src.exists():
+                logger.warning("upscale source missing", url=record.url, path=str(src))
+                return UpscaleOutcome.SKIPPED
+
+            # 临时文件按调用命名: 同一路径的并发超分不共用半截文件.
+            tmp = src.with_name(f"{src.stem}.{uuid4().hex}.sr_tmp{src.suffix}")
+            try:
+                if record.meta and "sr" in record.meta and self._matches_record(src, record):
+                    return UpscaleOutcome.SKIPPED
+                ok = await producer(src, tmp)
+                if not ok or not tmp.exists():
+                    logger.warning("upscale producer failed", url=record.url)
+                    return UpscaleOutcome.FAILED
+                tmp.replace(src)
+            except Exception as exc:
+                logger.warning("upscale in place error", url=record.url, error=str(exc))
+                return UpscaleOutcome.FAILED
+            finally:
+                tmp.unlink(missing_ok=True)
+
+            # 原地替换后重新量取, 记入的就是盘上那份.
+            size = src.stat().st_size
+            content_hash = self._hash_file(src)
+            new_meta = dict(record.meta) if record.meta else {}
+            new_meta["sr"] = sr_args
+
+            async with self._session() as session:
+                result = await session.exec(select(Resource).where(Resource.url == record.url))
+                row = result.first()
+                if row is None:
+                    return UpscaleOutcome.SKIPPED
+                row.size = size
+                row.content_hash = content_hash
+                row.meta = new_meta
+                session.add(row)
+                await session.commit()
+            return UpscaleOutcome.UPSCALED
 
     async def acquire_first(self, urls: list[str], client: WebClient) -> AcquireResult:
         if not urls:
@@ -383,3 +436,11 @@ class ResourceStore:
             for chunk in iter(lambda: f.read(8192), b""):
                 h.update(chunk)
         return h.hexdigest()
+
+    def _matches_record(self, path: Path, record: Resource) -> bool:
+        """路径上的字节是否仍是 ``record`` 记的那份."""
+        if record.content_hash is None or record.size is None or not path.exists():
+            return False
+        if path.stat().st_size != record.size:
+            return False
+        return self._hash_file(path) == record.content_hash

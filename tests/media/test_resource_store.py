@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import pytest
 
-from amane.media import ResourceStore, derived_locator
+from amane.media import ResourceStore, UpscaleOutcome, derived_locator
 from amane.media.resource_store import RESOURCE_URL_PREFIX, _is_placeholder_url, internal_url_hash
 from amane.net.http import RateLimiters, WebClient
 
@@ -47,6 +47,35 @@ class TestAcquireDerived:
         assert calls["n"] == 1
 
     @pytest.mark.asyncio
+    async def test_direct_hit_requires_record_bytes(self, resource_store: ResourceStore):
+        """文件存在不等于命中: 盘上字节已不是记录那份时必须重跑 producer, 相符才直接出."""
+
+        async def producer(dest: Path) -> bool:
+            dest.write_bytes(b"cropped-bytes")
+            return True
+
+        r1 = await resource_store.acquire_derived("https://s/t.jpg", "crop", "0.7", producer)
+        assert r1 is not None
+
+        # 同一路径被就地改写 (超分 / 外部改写), 文件仍在而记录未变.
+        resource_store.full_path(r1).write_bytes(b"stale-other-bytes")
+        calls = {"n": 0}
+
+        async def rerun(dest: Path) -> bool:
+            calls["n"] += 1
+            dest.write_bytes(b"cropped-bytes")
+            return True
+
+        r2 = await resource_store.acquire_derived("https://s/t.jpg", "crop", "0.7", rerun)
+        assert calls["n"] == 1  # 字节不符 → producer 重跑
+        assert r2 is not None
+        assert r2.url == r1.url
+
+        r3 = await resource_store.acquire_derived("https://s/t.jpg", "crop", "0.7", rerun)
+        assert calls["n"] == 1  # 字节相符 → 直接出
+        assert r3 is not None
+
+    @pytest.mark.asyncio
     async def test_producer_failure_returns_none(self, resource_store: ResourceStore):
         async def producer(dest: Path) -> bool:
             return False  # 不生成文件
@@ -83,7 +112,7 @@ class TestUpscaleInPlace:
             return True
 
         done = await resource_store.upscale_in_place(res, {"tool": "realesrgan", "scale": 4}, sr_producer)
-        assert done is True
+        assert done is UpscaleOutcome.UPSCALED
 
         updated = await resource_store.get_by_url(res.url)
         assert updated is not None
@@ -105,11 +134,11 @@ class TestUpscaleInPlace:
             out.write_bytes(b"sr1")
             return True
 
-        assert await resource_store.upscale_in_place(res, {"scale": 2}, sr_producer) is True
+        assert await resource_store.upscale_in_place(res, {"scale": 2}, sr_producer) is UpscaleOutcome.UPSCALED
         updated = await resource_store.get_by_url(res.url)
         assert updated is not None
         # 已有 sr 标记 → 再次调用跳过
-        assert await resource_store.upscale_in_place(updated, {"scale": 4}, sr_producer) is False
+        assert await resource_store.upscale_in_place(updated, {"scale": 4}, sr_producer) is UpscaleOutcome.SKIPPED
 
     @pytest.mark.asyncio
     async def test_producer_failure_keeps_original(self, resource_store: ResourceStore):
@@ -124,10 +153,83 @@ class TestUpscaleInPlace:
             return False
 
         done = await resource_store.upscale_in_place(res, {"scale": 4}, failing_sr)
-        assert done is False
+        assert done is UpscaleOutcome.FAILED
         updated = await resource_store.get_by_url(res.url)
         assert updated is not None
         assert updated.meta is not None and "sr" not in updated.meta  # 未标记
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("overwrite", "expect_rerun"),
+        [
+            (b"xYz", True),  # 与 sr1 等长而内容不同: 大小判据无分辨力, 必须落到哈希
+            (b"far-longer-than-sr1", True),  # 大小不同
+            (b"sr1", False),  # 记录所指的字节仍在盘上: 跳过
+        ],
+    )
+    async def test_marker_follows_disk_content(
+        self, resource_store: ResourceStore, overwrite: bytes, expect_rerun: bool
+    ):
+        """sr 标记的判据是记录的那份字节仍在本文件: 磁盘已被换掉时必须重跑, 不能永久跳过."""
+
+        async def producer(dest: Path) -> bool:
+            dest.write_bytes(b"original-bytes")
+            return True
+
+        res = await resource_store.acquire_derived("https://s/t.jpg", "crop", "0.7", producer)
+        assert res is not None
+
+        async def sr_producer(src: Path, out: Path) -> bool:
+            out.write_bytes(b"sr1")
+            return True
+
+        assert await resource_store.upscale_in_place(res, {"scale": 2}, sr_producer) is UpscaleOutcome.UPSCALED
+
+        # 模拟并发刮削把文件覆盖回去: 记录不变, 盘上的字节变了.
+        resource_store.full_path(res).write_bytes(overwrite)
+
+        marked = await resource_store.get_by_url(res.url)
+        assert marked is not None
+        rerun = await resource_store.upscale_in_place(marked, {"scale": 4}, sr_producer)
+
+        assert (rerun is UpscaleOutcome.UPSCALED) is expect_rerun
+        final = await resource_store.get_by_url(res.url)
+        assert final is not None
+        assert resource_store.full_path(final).read_bytes() == (b"sr1" if expect_rerun else overwrite)
+        assert final.content_hash == ResourceStore._hash_file(resource_store.full_path(final))
+        assert final.size == resource_store.full_path(final).stat().st_size
+
+    @pytest.mark.asyncio
+    async def test_decision_reads_record_not_caller_copy(self, resource_store: ResourceStore):
+        """跳过判据按锁内重读的记录判定: 调用方手上那份副本过期时不得重复超分."""
+
+        async def producer(dest: Path) -> bool:
+            dest.write_bytes(b"original-bytes")
+            return True
+
+        res = await resource_store.acquire_derived("https://s/t.jpg", "crop", "0.7", producer)
+        assert res is not None
+        assert res.meta is not None and "sr" not in res.meta  # 副本读在超分之前
+
+        async def sr_producer(src: Path, out: Path) -> bool:
+            out.write_bytes(b"sr-bytes")
+            return True
+
+        assert await resource_store.upscale_in_place(res, {"scale": 2}, sr_producer) is UpscaleOutcome.UPSCALED
+
+        ran: list[bytes] = []
+
+        async def second_sr(src: Path, out: Path) -> bool:
+            ran.append(src.read_bytes())
+            out.write_bytes(b"sr-again")
+            return True
+
+        # 仍拿着同一份过期副本: 记录已是超分结果且磁盘相符, 必须跳过.
+        assert await resource_store.upscale_in_place(res, {"scale": 4}, second_sr) is UpscaleOutcome.SKIPPED
+        assert ran == []
+        after = await resource_store.get_by_url(res.url)
+        assert after is not None
+        assert resource_store.full_path(after).read_bytes() == b"sr-bytes"
 
 
 class TestGetByUrlHash:
@@ -303,14 +405,19 @@ class TestPlaceholderRedirect:
         assert await resource_store.get_by_url(_REQUEST) is None
 
     @pytest.mark.asyncio
-    async def test_acquire_keeps_plain_redirect(self, resource_store: ResourceStore, monkeypatch: pytest.MonkeyPatch):
+    async def test_acquire_records_downloaded_size(
+        self, resource_store: ResourceStore, monkeypatch: pytest.MonkeyPatch
+    ):
+        """普通重定向仍下载; 记录写回的 size 就是盘上这份字节的字节数."""
         client, session = _stub_client(monkeypatch, final_url=_REQUEST, content=b"jpeg-bytes")
 
         path = await resource_store.acquire(_REQUEST, client)
 
         assert path is not None and path.read_bytes() == b"jpeg-bytes"
         assert session.methods[0] == "HEAD" and "GET" in session.methods
-        assert await resource_store.get_by_url(_REQUEST) is not None
+        record = await resource_store.get_by_url(_REQUEST)
+        assert record is not None
+        assert record.size == resource_store.full_path(record).stat().st_size
 
 
 def _siblings(dest: Path) -> list[Path]:
@@ -377,35 +484,73 @@ class TestAcquireFailure:
 
 class TestAcquireConcurrency:
     @pytest.mark.asyncio
-    async def test_failed_call_does_not_delete_completed_file(
+    async def test_failed_call_leaves_successful_call_intact(
         self, resource_store: ResourceStore, monkeypatch: pytest.MonkeyPatch
     ):
-        """并发获取同一 URL: 失败方要等成功方写完 dest 再失败, 成功方的文件与记录都必须还在."""
+        """并发获取同一 URL: 失败方既不留残缺文件, 也不动成功方写好的文件与记录.
+
+        同一 URL 的写入按 locator 串行, 因此两次调用只有先后两种次序, 都要求失败方无痕.
+        """
         released = asyncio.Event()
 
         class GatedSession(_StubSession):
-            """GET 先等成功方落盘, 保证失败方的收尾发生在 dest 写好之后."""
+            """成功方的 GET 停在闸门上, 让失败方先走完. 停住时缓存里还没有这条记录."""
 
             async def request(self, method: str, url: str, **kwargs: Any) -> _StubResponse:
                 if method == "GET":
                     await released.wait()
                 return await super().request(method, url, **kwargs)
 
-        ok_client, _ = _stub_client(monkeypatch, final_url=_REQUEST, content=b"jpeg-bytes")
-        fail_client = WebClient(limiters=RateLimiters(default_rate=100))
-        monkeypatch.setattr(fail_client, "_session", GatedSession(final_url=_REQUEST, statuses={"GET": 403}))
+        ok_client = WebClient(limiters=RateLimiters(default_rate=100))
+        monkeypatch.setattr(ok_client, "_session", GatedSession(final_url=_REQUEST, content=b"jpeg-bytes"))
+        fail_client, _ = _stub_client(monkeypatch, final_url=_REQUEST, statuses={"GET": 403})
 
         failing = asyncio.create_task(resource_store.acquire(_REQUEST, fail_client))
+        succeeding = asyncio.create_task(resource_store.acquire(_REQUEST, ok_client))
         try:
-            path = await resource_store.acquire(_REQUEST, ok_client)
-            assert path is not None and path.read_bytes() == b"jpeg-bytes"
             released.set()
-
-            assert await failing is None
-
-            assert path.read_bytes() == b"jpeg-bytes"
+            path = await succeeding
+            assert path is not None and path.read_bytes() == b"jpeg-bytes"
+            assert await failing is None  # 成功方写完后, 失败方直接拿到该文件
             record = await resource_store.get_by_url(_REQUEST)
             assert record is not None and resource_store.full_path(record) == path
+            assert record.content_hash == ResourceStore._hash_file(path)
         finally:
             released.set()
-            await asyncio.gather(failing, return_exceptions=True)
+            await asyncio.gather(failing, succeeding, return_exceptions=True)
+            await resource_store.invalidate(_REQUEST)
+
+    @pytest.mark.asyncio
+    async def test_second_caller_rechecks_cache_after_first(
+        self, resource_store: ResourceStore, monkeypatch: pytest.MonkeyPatch
+    ):
+        """两方同时越过缓存判据: 先进入者落盘落库后, 后来者必须重判并命中, 不得再下一次."""
+        released = asyncio.Event()
+        started = asyncio.Event()
+        downloads: list[str] = []
+
+        class GatedSession(_StubSession):
+            async def request(self, method: str, url: str, **kwargs: Any) -> _StubResponse:
+                if method == "GET":
+                    downloads.append(url)
+                    started.set()
+                    await released.wait()
+                return await super().request(method, url, **kwargs)
+
+        client = WebClient(limiters=RateLimiters(default_rate=100))
+        monkeypatch.setattr(client, "_session", GatedSession(final_url=_REQUEST, content=b"jpeg-bytes"))
+
+        first = asyncio.create_task(resource_store.acquire(_REQUEST, client))
+        second = asyncio.create_task(resource_store.acquire(_REQUEST, client))
+        try:
+            # 先进入者已判过缓存并开始下载, 后来者此刻也判过缓存: 记录还没写.
+            await started.wait()
+            released.set()
+            first_path = await first
+            second_path = await second
+            assert first_path is not None and first_path.read_bytes() == b"jpeg-bytes"
+            assert second_path == first_path
+            assert len(downloads) == 1
+        finally:
+            released.set()
+            await asyncio.gather(first, second, return_exceptions=True)
