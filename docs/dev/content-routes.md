@@ -16,7 +16,7 @@
 | 类型 | 意图 | 不纳入默认表 |
 |------|------|----------|
 | censored | 中文索引 → FANZA 权威图文 → 稳定镜像 → 可空返回的官网 / r18 | 单厂牌 API (Prestige 等对每个候选 SKU 都请求); iqqtv (每部有碼片都会请求中文站; 需要时加入本路由再把 `field_priority.title` 提前) |
-| uncensored | 有独立无碼区的索引 + 无碼专站 | kin8 (从任意番号抽数字拼详情, 会误匹配) |
+| uncensored | 有独立无碼区的索引 + 无碼专站 | — |
 | fc2 | javdb 分类 + 专用索引 + 官方电子市场 + BT 排在链尾 | fc2club (跳转镜像不稳定) |
 | chinese | 有國產区的中文站第一, 综合 / BT 兜底 | javdb 当第一源 |
 | amateur | MGS 第一; FANZA 有素人频道; javbus 首页能见到 `300MIUM-*` | MGS 不纳入有碼默认, 否则 MIDV 会请求 MGS |
@@ -57,7 +57,7 @@
 
 **getchu.com** — 美少女游戏 / 同人 / 动画周边, 商品是数字 id; 里番靠路径关键词分类, 所以是里番第一源.
 
-**kin8tengoku.com** — 从任意番号抽数字拼详情页, 会误匹配其它番号, 不纳入默认表.
+**kin8tengoku.com** — 单厂牌无碼站, 不纳入默认表 (用户按前缀自行加). 番号须带 `kin8` / `kin8tengoku` 前缀; 数字段在 1–9999 内时补零为 4 位再拼详情页, 越界或无前缀均不发 HTTP. 页是 Next.js 应用, 可解析字段只剩 `og:` 元标签与 CSS-module 类名.
 
 **theporndb.net** — 未登录跳转 `/login`; GraphQL 无 token 时影片 / 演员爬虫都直接 `None`. 欧美路由第一, 与影片共用 `site_config.api_token`. 欧美条目 `code` 是 `studio:title-slug`, 与文件名番号不同构, 日期号 (`Studio.YY.MM.DD`) 按片商 + 发布日期确认.
 
@@ -82,4 +82,4 @@
 
 ## 覆盖缺口
 
-**javdb 国产**: 国产路由以 iqqtv 为第一源, javdb 只当搜得到就用的兜底. **javdb 欧美**: 欧美不是主库存, 编号形态与 JAV 番号不同, 地域拦截时无法核列表; 欧美默认第一源为 theporndb, 未接入的 AVHEAT 优先级仍低于它.
+**javdb 国产**: 国产路由以 iqqtv 为第一源, javdb 只当搜得到就用的兜底. **javdb 欧美**: 欧美不是主库存, 编号形态与 JAV 番号不同, 地域拦截时无法核列表; 欧美默认第一源为 theporndb, 未接入的 AVHEAT 优先级仍低于它. **kin8**: 配信日由客户端水合产生, 首屏没有, 该来源的 `release` 恒为空.
