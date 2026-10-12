@@ -3759,7 +3759,7 @@ export const LibraryAutomationSchema = {
         'scrape'
     ],
     title: 'LibraryAutomation',
-    description: '媒体库自动化级别. 含更低级别的行为; 自动整理尚未开放.'
+    description: '媒体库自动化级别 (只控制发现侧). 含更低级别的行为; 自动整理由 `Library.auto_organize` 单独控制.'
 } as const;
 
 export const LibraryCreateRequestSchema = {
@@ -3782,6 +3782,11 @@ export const LibraryCreateRequestSchema = {
         automation: {
             $ref: '#/components/schemas/LibraryAutomation',
             default: 'scrape'
+        },
+        auto_organize: {
+            type: 'boolean',
+            title: 'Auto Organize',
+            default: false
         },
         ingest: {
             $ref: '#/components/schemas/LibraryIngest',
@@ -4017,6 +4022,10 @@ export const LibraryResponseSchema = {
         automation: {
             $ref: '#/components/schemas/LibraryAutomation'
         },
+        auto_organize: {
+            type: 'boolean',
+            title: 'Auto Organize'
+        },
         ingest: {
             $ref: '#/components/schemas/LibraryIngest'
         },
@@ -4192,6 +4201,7 @@ export const LibraryResponseSchema = {
         'name',
         'path',
         'automation',
+        'auto_organize',
         'ingest',
         'recursive',
         'move_mode',
@@ -4240,6 +4250,17 @@ export const LibraryUpdateRequestSchema = {
                     type: 'null'
                 }
             ]
+        },
+        auto_organize: {
+            anyOf: [
+                {
+                    type: 'boolean'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Auto Organize'
         },
         ingest: {
             anyOf: [
