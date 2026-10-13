@@ -14,6 +14,7 @@ from ..http import RequestError
 from ..models import FetchOptions, MediaMetadata, SearchQuery, film_actors
 from ..parsing import CSSSelector, extract_all_texts, extract_text
 from .dmm_api import DigitalResponse, DmmTvResponse, FanzaTvResponse, digital_payload, dmm_tv_payload, fanza_tv_payload
+from .dmm_cdn import image_candidates, poster_candidates
 
 
 class Category(StrEnum):
@@ -55,6 +56,32 @@ def _parse_category(url: str) -> Category:
     if "/rental/" in url:
         return Category.RENTAL
     return Category.OTHER
+
+
+# 样品图块三代布局的地址位置: 通販的旧块在 a/@href, 新块与月額在 img/@src, レンタル在 img/@src.
+_EXTRAFANART_SELECTORS = (
+    "//div[@id='sample-image-block']/a/@href",
+    "//a[@name='sample-image']/img/@data-lazy",
+    "//a[@name='sample-image']/img/@src",
+    "//div[@id='sample-image-block']//img/@src",
+)
+_EXTRAFANART_NUM_RE = re.compile(r"-(?P<num>\d+)\.jpg$")
+
+
+def _extrafanart_urls(html: Selector) -> list[str]:
+    """样品图 → 高清剧照地址; 封面与其它非剧照地址跳过.
+
+    页面给中等尺寸 (`{cid}-N.jpg`) 或已是大图 (`{cid}jp-N.jpg`, 月額页带缩放参数), 两种都归一到 jp-N.
+    """
+    urls: list[str] = []
+    for raw in extract_all_texts(html, *_EXTRAFANART_SELECTORS):
+        url = raw.split("?", 1)[0].split("#", 1)[0]
+        match = _EXTRAFANART_NUM_RE.search(url)
+        if match is None:
+            continue
+        stem = url[: match.start()].removesuffix("jp")
+        urls.append(f"{stem}jp-{match.group('num')}.jpg")
+    return urls
 
 
 class DmmCrawler(Crawler):
@@ -209,7 +236,7 @@ class DmmCrawler(Crawler):
         thumb_urls = [package_image.largeUrl] if package_image and package_image.largeUrl else []
         poster_urls = [package_image.mediumUrl] if package_image and package_image.mediumUrl else []
 
-        number = self._cid_to_number(cid)
+        number = self._cid_to_number(cid, retail=False)
 
         return MediaMetadata(
             number=number,
@@ -246,7 +273,8 @@ class DmmCrawler(Crawler):
 
         cid_match = re.search(r"(?:cid|id)=([^/&?]+)", url)
         number_raw = cid_match.group(1) if cid_match else ""
-        number = self._cid_to_number(number_raw)
+        # 只有 mono 柜台给通販 cid; 月額 / プレミアム 的 cid 与配信同形.
+        number = self._cid_to_number(number_raw, retail=_parse_category(url) is Category.MONO)
 
         _dd_span = self._DD_SPAN
         _dd_text = self._DD_TEXT
@@ -327,25 +355,25 @@ class DmmCrawler(Crawler):
             "//td[contains(text(),'ジャンル')]/following-sibling::td/a/text()",
         )
 
-        # 封面: 优先 JSON-LD image, 再回退 og:image.
-        thumb_url = ""
+        # 封面: 优先 JSON-LD image, 再回退 og:image; 两者都只给标准 CDN 地址.
+        cover_url = ""
         json_ld_text = extract_text(html, '//script[@type="application/ld+json"]/text()')
         if json_ld_text:
             try:
                 ld = json.loads(json_ld_text)
                 img = ld.get("image", "")
-                thumb_url = img if isinstance(img, str) else (img[0] if isinstance(img, list) and img else "")
+                cover_url = img if isinstance(img, str) else (img[0] if isinstance(img, list) and img else "")
             except KeyError, TypeError, ValueError:
                 pass
-        if not thumb_url:
-            thumb_url = extract_text(html, '//meta[@property="og:image"]/@content') or ""
-        if thumb_url:
-            thumb_url = thumb_url.replace("ps.jpg", "pl.jpg")
+        if not cover_url:
+            cover_url = extract_text(html, '//meta[@property="og:image"]/@content') or ""
+        cover_url = cover_url.replace("ps.jpg", "pl.jpg")
 
-        extrafanart_raw = extract_all_texts(
-            html, "//div[@id='sample-image-block']/a/@href", "//a[@name='sample-image']/img/@data-lazy"
-        )
-        extrafanart = [re.sub(r"-(\d+)\.jpg", r"jp-\1.jpg", i) for i in extrafanart_raw]
+        # 页面只引用标准 CDN, 高清副本由 dmm_cdn 推导; 竖版海报取 ps 形态.
+        thumb_urls = image_candidates(cover_url) if cover_url else []
+        poster_urls = poster_candidates(cover_url)
+
+        extrafanart = _extrafanart_urls(html)
 
         plot = "\n".join(extract_all_texts(html, CSSSelector(".wrapper-detailContents~div>p.mg-b20::text")))
 
@@ -375,7 +403,8 @@ class DmmCrawler(Crawler):
             tags=tags,
             series=series or None,
             plot=plot or None,
-            thumb_urls=[thumb_url] if thumb_url else [],
+            thumb_urls=thumb_urls,
+            poster_urls=poster_urls,
             score=score,
             directors=directors,
             extrafanart=extrafanart,
@@ -389,7 +418,7 @@ class DmmCrawler(Crawler):
 
         cid_match = re.search(r"(?:cid|id)=([^/&?]+)", url)
         number_raw = cid_match.group(1) if cid_match else ""
-        number = self._cid_to_number(number_raw)
+        number = self._cid_to_number(number_raw, retail=True)
 
         title = extract_text(html, '//h1[@id="title"]/text()', '//h1[@class="item fn bold"]/text()')
         runtime = self._parse_runtime(
@@ -408,11 +437,12 @@ class DmmCrawler(Crawler):
         )
         tags = extract_all_texts(html, "//td[contains(text(),'ジャンル')]/following-sibling::td/a/text()")
 
-        thumb_url = extract_text(html, '//meta[@property="og:image"]/@content')
-        if thumb_url:
-            thumb_url = thumb_url.replace("ps.jpg", "pl.jpg")
+        # 页面只引用标准 CDN, 高清副本由 dmm_cdn 推导; 竖版海报取 ps 形态.
+        cover_url = extract_text(html, '//meta[@property="og:image"]/@content').replace("ps.jpg", "pl.jpg")
+        thumb_urls = image_candidates(cover_url) if cover_url else []
+        poster_urls = poster_candidates(cover_url)
 
-        extrafanart = extract_all_texts(html, "//a[@name='sample-image']/img/@src")
+        extrafanart = _extrafanart_urls(html)
         plot = extract_text(html, CSSSelector(".clear p::text"))
         score_text = extract_text(html, "//p[contains(@class,'d-review__average')]/strong/text()")
         score = self._parse_score(score_text)
@@ -428,7 +458,8 @@ class DmmCrawler(Crawler):
             tags=tags,
             series=series or None,
             plot=plot or None,
-            thumb_urls=[thumb_url] if thumb_url else [],
+            thumb_urls=thumb_urls,
+            poster_urls=poster_urls,
             score=score,
             directors=directors,
             extrafanart=extrafanart,
@@ -530,17 +561,32 @@ class DmmCrawler(Crawler):
         )
 
     @staticmethod
-    def _cid_to_number(cid: str) -> str:
-        # 先去掉 n_709 / h_068 一类前缀, 再去掉 so/sp 等后缀, 最后拆出 PREFIX-数字.
-        cleaned = re.sub(r"^[a-z]_\d+", "", cid)
+    def _strip_store_prefix(cid: str) -> str:
+        """去掉通販 / レンタル cid 在番号前多出的厂商代码与限定版标记 (118abf295 / d2gvh891).
+
+        去掉后不是字母开头时保持原样: 数字开头的番号只出现在配信柜台 (13dsvr01968), 不走这里.
+        """
+        cleaned = re.sub(r"^(?:d\d+|\d+)", "", cid)
+        return cleaned if cleaned[:1].isalpha() else cid
+
+    @staticmethod
+    def _cid_to_number(cid: str, *, retail: bool) -> str:
+        """cid → 番号; 无法判定时返回 cid 大写.
+
+        ``retail`` 为通販 / レンタル cid: 番号前带厂商代码 (118abf295) 或限定版标记 (d2gvh891),
+        番号按原位数保留 (1sods098 → SODS-098). 配信与月額柜台的 cid 无前缀, 编号是 5 位补零,
+        去掉补零 (ssis00497 → SSIS-497); 数字开头的番号也只在这里出现 (13dsvr01968 → 13DSVR-1968).
+        """
+        cleaned = DmmCrawler._strip_store_prefix(cid) if retail else cid
+        # 去掉 n_709 / h_068 一类前缀与 so/sp 等后缀, 再拆出 PREFIX-数字.
+        cleaned = re.sub(r"^[a-z]_\d+", "", cleaned)
         cleaned = re.sub(r"(so|sp|tk|hd|hhb|hib)$", "", cleaned)
 
-        match = re.match(r"([a-z]+)0*(\d+)", cleaned)
+        match = re.match(r"(\d*[a-z]+)(0*)(\d+)", cleaned)
         if not match:
             return cid.upper()
-        prefix = match.group(1).upper()
-        digits = match.group(2)
-        return f"{prefix}-{digits}"
+        prefix, zeros, digits = match.groups()
+        return f"{prefix.upper()}-{zeros + digits if retail else digits}"
 
     @staticmethod
     def _parse_runtime(text: str) -> int | None:
