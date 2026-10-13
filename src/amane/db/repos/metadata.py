@@ -2,7 +2,7 @@ from collections.abc import Collection, Mapping, Sequence
 from datetime import datetime
 from typing import Unpack, cast
 
-from sqlalchemy import func, or_, text
+from sqlalchemy import or_, text
 from sqlalchemy.sql.functions import count
 from sqlmodel import col, select
 
@@ -22,6 +22,7 @@ from ..models import (
     SortOrder,
     Studio,
     has_subtitle_predicate,
+    metadata_number_predicate,
 )
 from ..repo_types import (
     MetadataFields,
@@ -221,7 +222,7 @@ class MetadataRepoMixin(RepositoryMixinBase):
     async def get_metadata_by_number(self, number: str) -> Metadata | None:
         """大小写不敏感; 返回行保留库内原始大小写."""
         async with self._session() as session:
-            stmt = select(Metadata).where(func.lower(Metadata.number) == number.lower())
+            stmt = select(Metadata).where(metadata_number_predicate(number))
             result = await session.exec(stmt)
             return result.first()
 
@@ -234,11 +235,16 @@ class MetadataRepoMixin(RepositoryMixinBase):
     ) -> Metadata:
         """查重忽略大小写; 已存在时不改写 number 的原始大小写.
         自动刮削写入; 锁定行为见 docs/dev/data-model.md.
+        判定与写入同处一个写事务, 见 docs/dev/database.md; 临界区内不允许出现等待.
         ``actor_genders`` 只填 ``Actor.gender`` 空位, 不是 Metadata 列.
         """
         fields = _normalize_text_fields(kwargs)
         async with self._session() as session:
-            stmt = select(Metadata).where(func.lower(Metadata.number) == number.lower())
+            # pysqlite 只在 DML 之前发出 BEGIN, 查号落在事务之外时并发同号写入会双双判定为「无行」,
+            # 后者在插入时违反 ix_metadata_number. 手工取得写锁后判定与写入同处一个事务.
+            connection = await session.connection()
+            await connection.exec_driver_sql("BEGIN IMMEDIATE")
+            stmt = select(Metadata).where(metadata_number_predicate(number))
             result = await session.exec(stmt)
             existing = result.first()
             if existing:
