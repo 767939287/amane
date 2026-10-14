@@ -73,23 +73,25 @@ async def execute_file_operations(
     paths: ResolvedPaths,
     move_mode: MoveMode,
     resource_store: ResourceStore,
+    file_info: FileInfo,
     download_images: bool = True,
     write_nfo: bool = True,
     copy_resources: Sequence[DownloadableResource] | None = None,
     web_client: WebClient | None = None,
     config: HotSettings | None = None,
     library: Library | None = None,
-    file_info: FileInfo | None = None,
     safe_dirs: Sequence[Path] | None = (),
     watermark_dir: Path | None = None,
     actor_genders: dict[str, ActorGender] | None = None,
 ) -> FileOperationsResult:
+    """``file_info`` 由渲染路径的那一次 ``parse_file_info`` 产出, 必须带上 ``has_external_subtitle``.
+
+    未带库列时函数不报错, 直接少打中字角标 — 调用方负责构造.
+    """
     source_path = await existing_disk_path(Path(media_file.path))
     if source_path is None:
         logger.warning("source file missing", path=media_file.path)
         return FileOperationsResult(outcome=PlaceOutcome.FAILED, error=f"源文件不存在: {media_file.path}")
-
-    info = file_info if file_info is not None else parse_file_info(source_path)
 
     # 目标被别的文件占用时立即返回: 不下载图片, 不写附属文件, 不改库内任何路径.
     # 读不出目标状态时同样立即返回, 但记为失败而不是冲突.
@@ -114,14 +116,14 @@ async def execute_file_operations(
             paths,
             config,
             kinds,
-            file_info=info,
+            file_info=file_info,
             watermark_dir=watermark_dir,
         )
 
     # 发现字幕: 必须在视频移动前检查同目录.
     subtitles: list[Path] = []
     if library is not None:
-        subtitles = await discover_subtitles(source_path, library.subtitle_extensions, info)
+        subtitles = await discover_subtitles(source_path, library.subtitle_extensions, file_info)
 
     org_result = await execute_organize(
         source=source_path,
@@ -145,7 +147,7 @@ async def execute_file_operations(
                     Path(library.path),
                     metadata,
                     source_path=source_path,
-                    file_info=info,
+                    file_info=file_info,
                     link=paths.link,
                     actor_genders=actor_genders,
                 )
@@ -168,7 +170,7 @@ async def execute_file_operations(
             video_dest=org_result.dest,
             library=library,
             metadata=metadata,
-            file_info=info,
+            file_info=file_info,
             mode=move_mode,
             safe_dirs=safe_dirs,
             link_dir=paths.link.parent if paths.link is not None else None,
@@ -212,7 +214,7 @@ async def apply_file_operations(
 
     # 渲染路径后执行落盘.
     ext = Path(media_file.path).suffix.lstrip(".")
-    file_info = parse_file_info(media_file.path)
+    file_info = parse_file_info(media_file.path, has_external_subtitle=media_file.has_external_subtitle)
     actor_genders = {a.name: a.gender for a in await repo.get_actors_by_names(metadata.actors)}
     paths = resolve_paths(
         library,
@@ -224,18 +226,18 @@ async def apply_file_operations(
         actor_genders=actor_genders,
     )
     return await execute_file_operations(
-        media_file=media_file,
-        metadata=metadata,
-        paths=paths,
-        move_mode=library.move_mode,
-        resource_store=resource_store,
+        media_file,
+        metadata,
+        paths,
+        library.move_mode,
+        resource_store,
+        file_info,
         download_images=True,
         write_nfo=write_nfo,
         copy_resources=copy_resources,
         web_client=web_client,
         config=config,
         library=library,
-        file_info=file_info,
         safe_dirs=safe_dirs,
         watermark_dir=watermark_dir,
         actor_genders=actor_genders,

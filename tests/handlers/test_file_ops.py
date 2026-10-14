@@ -11,7 +11,7 @@ from amane.db.models import MediaFile, Metadata
 from amane.handlers.file import execute_file_operations
 from amane.media import ResourceStore
 from amane.organize import MoveMode, PlaceOutcome, ResolvedPaths
-from amane.parsing import ContentType, FileInfo
+from amane.parsing import parse_file_info
 
 if TYPE_CHECKING:
     from amane.net.http import WebClient
@@ -81,6 +81,7 @@ async def test_internal_poster_and_trailer(resource_store: ResourceStore, tmp_pa
         paths=paths,
         move_mode=MoveMode.COPY,
         resource_store=resource_store,
+        file_info=parse_file_info(src),
         web_client=client,
         config=HotSettings(),
     )
@@ -113,6 +114,7 @@ async def test_target_occupied_returns_before_side_effects(resource_store: Resou
         paths=paths,
         move_mode=MoveMode.MOVE,
         resource_store=resource_store,
+        file_info=parse_file_info(src),
         web_client=client,
         config=HotSettings(),
     )
@@ -154,6 +156,7 @@ async def test_unknown_target_state_returns_before_side_effects(
         paths=paths,
         move_mode=MoveMode.MOVE,
         resource_store=resource_store,
+        file_info=parse_file_info(src),
         web_client=client,
         config=HotSettings(),
     )
@@ -187,6 +190,7 @@ async def test_copy_resources_skips_trailer(resource_store: ResourceStore, tmp_p
         paths=paths,
         move_mode=MoveMode.COPY,
         resource_store=resource_store,
+        file_info=parse_file_info(src),
         web_client=client,
         config=HotSettings(),
         copy_resources=[DownloadableResource.thumb, DownloadableResource.poster],
@@ -212,6 +216,7 @@ async def test_write_nfo_false_skips_nfo(resource_store: ResourceStore, tmp_path
         paths=paths,
         move_mode=MoveMode.COPY,
         resource_store=resource_store,
+        file_info=parse_file_info(src),
         web_client=client,
         config=HotSettings(),
         write_nfo=False,
@@ -241,6 +246,7 @@ async def test_missing_internal_resource_falls_back_to_crop(resource_store: Reso
         paths=paths,
         move_mode=MoveMode.COPY,
         resource_store=resource_store,
+        file_info=parse_file_info(src),
         web_client=client,
         config=HotSettings(),
     )
@@ -269,9 +275,9 @@ async def test_watermark_respects_enabled(resource_store: ResourceStore, tmp_pat
         paths=paths,
         move_mode=MoveMode.COPY,
         resource_store=resource_store,
+        file_info=parse_file_info(src, has_external_subtitle=mf.has_external_subtitle),
         web_client=client,
         config=HotSettings(watermark=WatermarkConfig(enabled=enabled, scale=0.2)),
-        file_info=FileInfo(number="MIDV-123", content_type=ContentType.CENSORED, prefix="MIDV", has_subtitle=True),
         watermark_dir=user_dir,
     )
     assert result.outcome is PlaceOutcome.PLACED
@@ -282,3 +288,36 @@ async def test_watermark_respects_enabled(resource_store: ResourceStore, tmp_pat
         assert pixel[0] > 180 and pixel[2] < 80
     else:
         assert pixel[2] > 180 and pixel[0] < 80
+
+
+@pytest.mark.asyncio
+async def test_watermark_from_external_subtitle(resource_store: ResourceStore, tmp_path: Path):
+    """文件名没有 -C 时, 库里的同目录字幕命中同样打出封面中字角标."""
+    client = cast("WebClient", FakeClient())
+    src = tmp_path / "src" / "MIDV-123.mp4"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"movie")
+
+    user_dir = tmp_path / "watermarks"
+    user_dir.mkdir()
+    Image.new("RGBA", (40, 20), (255, 0, 0, 255)).save(user_dir / "subtitle.png")
+
+    mf = MediaFile(path=str(src), library_id=1, has_external_subtitle=True)
+    meta = Metadata(number="MIDV-123", thumb_urls=["https://s/t.jpg"])
+    paths = _paths(tmp_path / "out")
+    result = await execute_file_operations(
+        media_file=mf,
+        metadata=meta,
+        paths=paths,
+        move_mode=MoveMode.COPY,
+        resource_store=resource_store,
+        file_info=parse_file_info(src, has_external_subtitle=mf.has_external_subtitle),
+        web_client=client,
+        config=HotSettings(watermark=WatermarkConfig(enabled=True, scale=0.2)),
+        watermark_dir=user_dir,
+    )
+    assert result.outcome is PlaceOutcome.PLACED
+    with Image.open(paths.thumb) as img:
+        pixel = img.convert("RGB").getpixel((20, 20))
+    assert isinstance(pixel, tuple)
+    assert pixel[0] > 180 and pixel[2] < 80
