@@ -23,6 +23,14 @@ scrape 等 handler 只调用 `current()`; 其它代码仍可直接使用 `logger
 
 **打点约定**: Worker 在 `task started` 时打印 payload 全量; scrape 等 handler 用 `current().debug/info/...`. Recorder 活跃时, WebClient 对最终失败的 `request failed` 降为 debug — 结构化失败以 `http exchange` + `http/index.jsonl` 为准.
 
+## 数据库慢路径日志
+
+`db/profiling.py::install_profiling` 注册在业务 SQLite 引擎上; 迁移连接、临时记录库与 r18 只读引擎不注册. 日志只进 `app.log` 与对应任务的 `task.log`, 不落库也不经接口下发 — 界面 Logs 页仅为实时缓冲, 历史只能取自这两处日志.
+
+- **错误归口**: DBAPI 异常归为 `locked` / `disconnect` / `other` 三类, 分别限速; `handle_error` 返回 `None`, 原异常照常抛给调用方, 各调用点行为不变. `classify_db_error` 是锁类判定的唯一出处.
+- **耗时**: 提交与语句各有阈值; 达阈值的提交附带本次事务的语句轨迹, 据此定位提交耗时的来源.
+- **限速与计数**: 同一类别两次日志之间有最小间隔; 窗口内被抑制的条数由下一次日志的 `count` 交代, 因此日志里的条数即实际发生数.
+
 ## Per-task 隔离
 
 `ContextVar(task_id)` + 每 handler 一个 `TaskIdFilter`; `asyncio.create_task` 自动复制上下文. 生命周期: 删除任务时同步删除整个 `task-{id}/` (文件删除失败仅告警), `begin` 在 mkdir 后删除目录里已有的 `summary.json` — SQLite 可复用已删除任务的 id, 新任务不得沿用同 id 目录里残留的刮削摘要.
