@@ -66,6 +66,8 @@ git worktree add ../<repo>-<topic> -b <branch> main
 - 如果修复需要改动本 PR 的设计方案则需向用户报告.
 - 修完按同样的节奏攒着, 等用户确认后再推, 不逐次推送.
 
+PR 的 CI 通过之后再合入, main 上的那一轮 CI 不需要等待 — 那是同一棵树的重复运行. 改动只涉及文档与注释时, 这一轮 CI 同样不必等待. rebase / force-push 会作废上一轮, 这类改动必须重新等这一轮通过.
+
 ## Issue
 
 PR 有相关 Issue 时, 按是否彻底解决区分, 写在正文**末尾**:
@@ -96,6 +98,14 @@ Fix #34
 - 合并用 PR 自身的标题, 不在合并时另指定 message; 要改合并提交的内容就改 PR 标题
 
 合入后, 删除该 PR 的 worktree 与本地分支, 同步 main; 若是从本仓库分支创建的, 还要删除远程分支.
+
+### 堆叠式 PR
+
+一个需求涉及多个领域的改动、且预期规模较大时, 放进单个 PR 不合适; 按领域各自开向 main, 又会因彼此依赖而冲突. 此时用堆叠式 PR: 改动按依赖关系分成多层, 上层 PR 的目标分支是下层分支. 它本身没有额外机制, 只是允许 PR 的目标分支不是 main (`gh stack` 的 `init` / `add` / `submit`).
+
+堆叠内的 PR 不能逐个 `gh pr merge` (GitHub 拒绝); 用 `gh stack merge [<PR 号>] --yes --squash` 一次合入, 整批原子, 每个 PR 各留一个 squash 提交. `gh stack` 的本地跟踪在 rebase / force-push 之后可能失效 (报 `not part of a stack`), 此时改用 PR 号.
+
+自下而上合入: 下层合入后上层 PR 的 base 自动改指 main; 未自动改指时, 删除已合入的远程分支即可. 随后把上层的剩余提交重基到新 main (`git rebase --onto origin/main <下层旧 tip>`), 并按 Alembic 一节与 `just generate` 重新核对迁移与生成物.
 
 ## Alembic
 
