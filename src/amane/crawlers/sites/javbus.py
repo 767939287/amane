@@ -7,7 +7,7 @@ from ...enums import SiteName
 from ..base import Crawler, CrawlerProfile
 from ..http import RequestError
 from ..models import FetchOptions, MediaMetadata, SearchQuery, film_actors
-from ..parsing import extract_all_texts, extract_text, fold_number
+from ..parsing import extract_all_texts, extract_text, number_variants, select_number_index
 
 
 class JavBusCrawler(Crawler):
@@ -22,8 +22,21 @@ class JavBusCrawler(Crawler):
         )
 
     async def _search(self, query: SearchQuery, options: FetchOptions | None = None) -> str | None:
-        number = query.number
+        """站内地址与检索词只写去掉开头数字段的番号, 因此按 ``number_variants`` 逐个形态尝试."""
+        last_error: RequestError | None = None
+        for number in number_variants(query.number):
+            try:
+                url = await self._search_number(number, query.number)
+            except RequestError as exc:
+                last_error = exc
+                continue
+            if url is not None:
+                return url
+        if last_error is not None:
+            raise last_error
+        return None
 
+    async def _search_number(self, number: str, query_number: str) -> str | None:
         # 先尝试直接访问详情页.
         direct_url = f"{self.base_url}/{number}"
         try:
@@ -36,24 +49,25 @@ class JavBusCrawler(Crawler):
             if title:
                 return direct_url
 
-        # 未命中则回退搜索. 站内检索为模糊匹配, 会返回番号相近的条目, 因此逐条比对结果
-        # <date> 中的番号: 精确优先, 再忽略短横线与空格; 全不相符视为来源无此番号.
+        # 未命中则回退搜索. 站内检索为模糊匹配, 会返回番号相近的条目, 因此逐条比对结果 <date> 中的
+        # 番号, 不取首条.
         search_url = f"{self.base_url}/search/{number}&type=&parent=ce"
-        text = await self.client.get_html(search_url, cookies=self.cookies, headers=self.headers)
+        try:
+            text = await self.client.get_html(search_url, cookies=self.cookies, headers=self.headers)
+        except RequestError as exc:
+            # 检索词一条也匹配不上时站点直接 404, 与直达 404 同义, 判无此番号; 其余失败照旧上报.
+            if exc.http_status != 404:
+                raise
+            return None
         html = Selector(text=text)
-        folded = fold_number(number)
-        folded_hit: str | None = None
-        for item in html.xpath("//a[@class='movie-box']"):
-            href = item.xpath("./@href").get()
-            found = extract_text(item, "div[@class='photo-info']//date[1]/text()")
-            if not href or not found:
-                continue
-            url = urljoin(self.base_url, href)
-            if found.casefold() == number.casefold():
-                return url
-            if folded_hit is None and fold_number(found) == folded:
-                folded_hit = url
-        return folded_hit
+        candidates = [
+            (urljoin(self.base_url, href), found)
+            for item in html.xpath("//a[@class='movie-box']")
+            if (href := item.xpath("./@href").get())
+            and (found := extract_text(item, "div[@class='photo-info']//date[1]/text()"))
+        ]
+        index = select_number_index([found for _, found in candidates], query_number)
+        return candidates[index][0] if index is not None else None
 
     async def _scrape(self, url: str, options: FetchOptions | None = None) -> MediaMetadata | None:
         text = await self.client.get_html(url, cookies=self.cookies, headers=self.headers)
