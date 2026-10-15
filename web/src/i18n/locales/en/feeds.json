@@ -147,7 +147,7 @@
     "disableSelected": "Disable",
     "enableAutoEnqueueSelected": "Auto-scrape new items",
     "disableAutoEnqueueSelected": "No auto-scrape",
-    "rescrape": "Rescrape",
+    "scrape": "Scrape",
     "ignore": "Ignore",
     "unignore": "Unignore",
     "markRead": "Mark as read",

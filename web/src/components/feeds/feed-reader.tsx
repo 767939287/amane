@@ -822,7 +822,7 @@ export function FeedReader({
           disabled={selectedIds.length === 0 || busy}
           onClick={() => scrapeMutation.mutate(selectedIds)}
         >
-          {t("actions.rescrape")}
+          {t("actions.scrape")}
         </Button>
       </SelectionBar>
 

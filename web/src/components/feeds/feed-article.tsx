@@ -98,7 +98,7 @@ export function FeedArticle({
       <Menu.Dropdown>
         {number != null && (
           <Menu.Item leftSection={<IconRefresh size={14} />} onClick={onScrape}>
-            {t("actions.rescrape")}
+            {t("actions.scrape")}
           </Menu.Item>
         )}
         <Menu.Item
@@ -131,7 +131,7 @@ export function FeedArticle({
         <HintedActionIcon
           variant="subtle"
           disabled={busy}
-          label={t("actions.rescrape")}
+          label={t("actions.scrape")}
           onClick={onScrape}
         >
           <IconRefresh size={16} />

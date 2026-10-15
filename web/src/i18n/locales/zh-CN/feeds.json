@@ -135,7 +135,7 @@
     "disableSelected": "停用",
     "enableAutoEnqueueSelected": "自动刮削新条目",
     "disableAutoEnqueueSelected": "不自动刮削",
-    "rescrape": "重新刮削",
+    "scrape": "刮削",
     "ignore": "忽略",
     "unignore": "取消忽略",
     "markRead": "标为已读",
