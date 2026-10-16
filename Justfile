@@ -58,8 +58,14 @@ fix-python:
 fix-web:
     pnpm fix
 
-typecheck:
+typecheck: typecheck-pyright typecheck-ty
+
+# pre-push: pyright 类型检查 (TypeScript 实现, 慢于 ty)
+typecheck-pyright:
     uv run pyright
+
+# pre-commit: ty 类型检查 (Rust 实现)
+typecheck-ty:
     uv run ty check
 
 # web: oxlint + oxfmt + tsc + i18n
