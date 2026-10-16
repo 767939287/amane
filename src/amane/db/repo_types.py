@@ -104,8 +104,21 @@ def _metadata_has_files_clause(*, has_files: bool) -> ColumnElement[bool]:
     return file_exists if has_files else ~file_exists
 
 
+def _media_file_entry_type_predicate(content_type: ContentType) -> ColumnElement[bool]:
+    """文件列表按类型筛的是所属条目, 未绑定条目的文件不命中任何类型."""
+    return exists().where(col(Metadata.id) == col(MediaFile.metadata_id), col(Metadata.content_type) == content_type)
+
+
 def _media_file_uncensored_predicate() -> ColumnElement[bool]:
-    return or_(col(MediaFile.mosaic) == Mosaic.UNCENSORED, col(MediaFile.content_type) == ContentType.UNCENSORED)
+    """文件视角的无码: 所属条目类型为无码, 或这一份文件带无码标记.
+
+    两侧都要空值安全: ``mosaic`` 可空, 用 ``=`` 时 NULL 参与 ``OR`` 会让整个条件求值为 NULL, 取反后把没有标记
+    的文件一起排除; 子查询写成 ``IN`` 时未绑定条目 (``metadata_id IS NULL``) 同样求值为 NULL.
+    """
+    entry_uncensored = exists().where(
+        col(Metadata.id) == col(MediaFile.metadata_id), col(Metadata.content_type) == ContentType.UNCENSORED
+    )
+    return or_(col(MediaFile.mosaic).is_(Mosaic.UNCENSORED), entry_uncensored)
 
 
 def _apply_media_phase_filters(
@@ -117,7 +130,7 @@ def _apply_media_phase_filters(
     definition: str | None = None,
     content_type: ContentType | None = None,
 ) -> SelectOfScalar[MediaFile]:
-    """None 表示该相位不过滤."""
+    """None 表示该相位不过滤; content_type 按所属条目筛."""
     if has_subtitle is not None:
         flag = has_subtitle_predicate()
         stmt = stmt.where(flag if has_subtitle else ~flag)
@@ -129,12 +142,20 @@ def _apply_media_phase_filters(
     if definition is not None:
         stmt = stmt.where(col(MediaFile.definition) == definition)
     if content_type is not None:
-        stmt = stmt.where(col(MediaFile.content_type) == content_type)
+        stmt = stmt.where(_media_file_entry_type_predicate(content_type))
     return stmt
 
 
 def _metadata_linked_file_exists(*extra: ColumnElement[bool]) -> ColumnElement[bool]:
     return exists().where(col(MediaFile.metadata_id) == col(Metadata.id), *extra)
+
+
+def _metadata_uncensored_predicate() -> ColumnElement[bool]:
+    """条目无码: 类型为无码, 或存在带无码标记的文件. 没有挂载文件也成立."""
+    return or_(
+        col(Metadata.content_type) == ContentType.UNCENSORED,
+        _metadata_linked_file_exists(col(MediaFile.mosaic) == Mosaic.UNCENSORED),
+    )
 
 
 def _facet_primary_order(sort_by: FacetSortField, order: SortOrder, *, name_col: Any, count_expr: Any) -> Any:

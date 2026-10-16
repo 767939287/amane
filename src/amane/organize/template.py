@@ -13,9 +13,9 @@ from ..enums import ActorGender
 from ..parsing.file_info import (
     CONTENT_TYPE_VALUES,
     DEFINITION_VALUES,
-    MOSAIC_VALUES,
+    MOSAIC_NATURE_VALUES,
     FileInfo,
-    parse_file_info,
+    mosaic_nature,
     split_number,
 )
 from ..utils.path import is_any_descendant, is_descendant
@@ -69,7 +69,7 @@ PLACEHOLDERS: tuple[str, ...] = tuple(TemplateVariables.__annotations__)
 # 有闭合取值的占位符: 映射表的 key 必须是规范值, 否则写入 422. 未列入的占位符 (如 cd?) 不校验 key.
 PLACEHOLDER_MAP_KEYS: dict[str, tuple[str, ...]] = {
     "content_type": CONTENT_TYPE_VALUES,
-    "mosaic?": MOSAIC_VALUES,
+    "mosaic?": MOSAIC_NATURE_VALUES,
     "def?": DEFINITION_VALUES,
     "sub?": ("C",),
 }
@@ -341,12 +341,10 @@ def _build_variables(
         "raw_name": raw_name,
         "cd?": str(cd) if cd is not None else "",
         "sub?": "C" if file_info is not None and file_info.has_subtitle else "",
-        "content_type": (
-            str(file_info.content_type)
-            if file_info is not None
-            else (str(parse_file_info(text=metadata.number).content_type) if metadata.number else "")
-        ),
-        "mosaic?": file_info.mosaic if file_info is not None and file_info.mosaic else "",
+        "content_type": str(metadata.content_type),
+        "mosaic?": str(nature)
+        if (nature := mosaic_nature(file_info.mosaic if file_info else None, metadata.content_type))
+        else "",
         "def?": file_info.definition if file_info is not None and file_info.definition else "",
         "video_dir": _UNKNOWN,
         "video_name": _UNKNOWN,

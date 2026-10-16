@@ -27,6 +27,42 @@ async def _seed_library(repo: Repository) -> None:
 
 class TestMetadataHttp:
     @pytest.mark.asyncio(loop_scope="function")
+    async def test_list_phase_comes_from_number_without_files(self, client: AsyncClient, repo: Repository):
+        """有码 / 无码取番号类别: 没有挂载文件也亮, 无码再并上文件的无码标记."""
+        uncensored = await repo.upsert_metadata(number="HEYZO-1234")
+        marked = await repo.upsert_metadata(number="MIDV-002")
+        assert uncensored.id is not None and marked.id is not None
+        media = await repo.create_media_file(library_id=1, path="/video/MIDV-002-无码.mp4")
+        assert media.id is not None
+        await repo.update_media_file(media.id, metadata_id=marked.id)
+
+        listed = await client.get("metadata?sort_by=number&order=asc")
+        items = {item["number"]: item for item in listed.json()["items"]}
+        assert items["HEYZO-1234"]["file_count"] == 0
+        assert items["HEYZO-1234"]["file_phase"] == {
+            "has_subtitle": False,
+            "censored": False,
+            "uncensored": True,
+            "mosaics": [],
+            "definition": None,
+        }
+        assert items["MIDV-002"]["file_phase"]["censored"] is True
+        assert items["MIDV-002"]["file_phase"]["uncensored"] is True
+        assert items["MIDV-002"]["file_phase"]["mosaics"] == ["uncensored"]
+
+        detail = await client.get(f"metadata/{uncensored.id}")
+        assert detail.json()["metadata"]["file_phase"]["uncensored"] is True
+        assert detail.json()["files"] == []
+
+        uncensored_filtered = await client.get("metadata?uncensored=true")
+        assert {item["number"] for item in uncensored_filtered.json()["items"]} == {"HEYZO-1234", "MIDV-002"}
+        by_type = await client.get("metadata?content_type=uncensored")
+        assert [item["number"] for item in by_type.json()["items"]] == ["HEYZO-1234"]
+        by_mosaic = await client.get("metadata?mosaic=uncensored")
+        assert [item["number"] for item in by_mosaic.json()["items"]] == ["MIDV-002"]
+        assert (await client.get("metadata?mosaic=censored")).status_code == 422
+
+    @pytest.mark.asyncio(loop_scope="function")
     async def test_list_detail_update_delete(self, client: AsyncClient, repo: Repository):
         empty = await client.get("metadata")
         assert empty.status_code == 200
@@ -89,6 +125,20 @@ class TestMetadataHttp:
         deleted = await client.delete(f"metadata/{meta.id}")
         assert deleted.status_code == 204
         assert (await client.delete("metadata/9999")).status_code == 404
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_detail_file_rows_carry_derived_phase(self, client: AsyncClient, repo: Repository):
+        """详情里的文件行与条目相位同源: 有码条目的文件行带 censored, 带无码标记的再带 uncensored."""
+        meta = await repo.upsert_metadata(number="MIDV-123")
+        assert meta.id is not None
+        plain = await repo.create_media_file(library_id=1, path="/video/MIDV-123.mp4", metadata_id=meta.id)
+        marked = await repo.create_media_file(library_id=1, path="/video/MIDV-124-无码.mp4", metadata_id=meta.id)
+        assert plain.id is not None and marked.id is not None
+
+        detail = await client.get(f"metadata/{meta.id}")
+        rows = {row["id"]: row for row in detail.json()["files"]}
+        assert (rows[plain.id]["censored"], rows[plain.id]["uncensored"]) == (True, False)
+        assert (rows[marked.id]["censored"], rows[marked.id]["uncensored"]) == (False, True)
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_list_sort_by_score(self, client: AsyncClient, repo: Repository):

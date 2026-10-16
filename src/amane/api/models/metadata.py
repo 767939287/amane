@@ -17,9 +17,10 @@ _METADATA_FIELD_VALUES = frozenset(str(field) for field in MetadataField)
 
 
 class FilePhaseSummary(BaseModel):
-    """关联文件相位聚合: 任一文件具备即亮; definition 取最高档."""
+    """条目相位聚合; 判定见 ``parsing/file_info.py::summarize_file_phases``, definition 取最高档."""
 
     has_subtitle: bool = False
+    censored: bool = False
     uncensored: bool = False
     mosaics: list[Mosaic] = []
     definition: str | None = None
@@ -28,6 +29,7 @@ class FilePhaseSummary(BaseModel):
 class MetadataResponse(BaseModel):
     id: int
     number: str
+    content_type: ContentType
     title: str | None = None
     actors: list[str] = []
     studio: str | None = None
@@ -72,10 +74,19 @@ class MetadataResponse(BaseModel):
 if TYPE_CHECKING:
     type PartialMetadata = Metadata
 
-# 外部可写字段: 排除只读列 (id/number/时间戳), 仅后端可写字段 (raw/field_sources 由刮削写入) 与锁列 (经 PUT locks 管理).
+# 外部可写字段: 排除只读列 (id/number/content_type/时间戳), 仅后端可写字段 (raw/field_sources 由刮削写入) 与锁列 (经 PUT locks 管理).
 PartialMetadata = create_partial_model(
     Metadata,
-    ignore_fields=("id", "number", "created_at", "updated_at", "raw", "field_sources", "locked_fields"),
+    ignore_fields=(
+        "id",
+        "number",
+        "content_type",
+        "created_at",
+        "updated_at",
+        "raw",
+        "field_sources",
+        "locked_fields",
+    ),
     json_schema_extras={
         "extrafanart_urls": anyof_extras(kv({"v-x-long": True})),
         "release": anyof_extras(
@@ -133,7 +144,7 @@ class MetadataBatchDeleteResponse(BaseModel):
 class MetadataBatchScrapeRequest(BaseModel):
     ids: list[int] = Field(min_length=1, description="Metadata ID 列表")
     content_type: ContentType | None = Field(
-        default=None, description="内容类型; None = 服务端推断 (挂载文件路径 → 番号模式)"
+        default=None, description="内容类型; None = 用条目已落定的类型 (不重新推断)"
     )
     use_cache: set[CacheKind] = Field(
         default_factory=lambda: {CacheKind.metadata, CacheKind.trans},

@@ -32,7 +32,7 @@ class TestMediaHttp:
         assert listed.status_code == 200
         item = listed.json()["items"][0]
         assert item["has_subtitle"] is True
-        assert item["content_type"] == "censored"
+        assert item["mosaic"] is None
 
         got = await client.get(f"media/{media.id}")
         assert got.status_code == 200
@@ -58,3 +58,33 @@ class TestMediaHttp:
         deleted = await client.delete(f"media/{media.id}")
         assert deleted.status_code == 204
         assert (await client.delete("media/9999")).status_code == 404
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_phase_derived_from_entry_type(self, client: AsyncClient, repo: Repository):
+        """文件行的有码 / 无码按条目类型派生; 未绑定条目的文件只看自身标记."""
+        censored = await repo.upsert_metadata(number="MIDV-123")
+        uncensored = await repo.upsert_metadata(number="HEYZO-1234")
+        assert censored.id is not None and uncensored.id is not None
+        plain = await repo.create_media_file(library_id=1, path="/v/MIDV-123.mp4", metadata_id=censored.id)
+        marked = await repo.create_media_file(library_id=1, path="/v/MIDV-124-无码.mp4", metadata_id=censored.id)
+        inherited = await repo.create_media_file(library_id=1, path="/v/HEYZO-1234.mp4", metadata_id=uncensored.id)
+        orphan = await repo.create_media_file(library_id=1, path="/v/PLAIN-1.mp4")
+        assert plain.id and marked.id and inherited.id and orphan.id
+
+        listed = await client.get("media?limit=50")
+        rows = {row["id"]: row for row in listed.json()["items"]}
+        assert (rows[plain.id]["censored"], rows[plain.id]["uncensored"]) == (True, False)
+        # 带无码标记的副本: 性质是无码, 不再同时挂有码
+        assert (rows[marked.id]["censored"], rows[marked.id]["uncensored"]) == (False, True)
+        assert (rows[inherited.id]["censored"], rows[inherited.id]["uncensored"]) == (False, True)
+        assert (rows[orphan.id]["censored"], rows[orphan.id]["uncensored"]) == (False, False)
+        assert rows[marked.id]["mosaic"] == "uncensored"
+
+        single = await client.get(f"media/{inherited.id}")
+        assert (single.json()["censored"], single.json()["uncensored"]) == (False, True)
+
+        # 按所属条目类型筛: 未绑定条目的文件不命中任何类型
+        by_type = await client.get("media?content_type=uncensored")
+        assert [row["id"] for row in by_type.json()["items"]] == [inherited.id]
+        assert by_type.json()["total"] == 1
+        assert (await client.get("media?content_type=bogus")).status_code == 422

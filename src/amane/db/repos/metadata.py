@@ -7,7 +7,7 @@ from sqlalchemy.sql.functions import count
 from sqlmodel import col, select
 
 from ...enums import ActorGender, MetadataField
-from ...parsing import ContentType, Mosaic
+from ...parsing import ContentType, Mosaic, infer_content_type
 from ...utils.collections import unique_ids
 from ...utils.text import normalize_long_text
 from ..models import (
@@ -29,10 +29,10 @@ from ..models import (
 from ..repo_types import (
     MetadataFields,
     WriteMode,
-    _media_file_uncensored_predicate,
     _metadata_has_files_clause,
     _metadata_linked_file_exists,
     _metadata_primary_order,
+    _metadata_uncensored_predicate,
     _utcnow,
 )
 from .base import RepositoryMixinBase
@@ -200,14 +200,13 @@ class MetadataRepoMixin(RepositoryMixinBase):
                 base = base.where(~_metadata_linked_file_exists(has_subtitle_predicate()))
             if mosaic is not None:
                 base = base.where(_metadata_linked_file_exists(col(MediaFile.mosaic) == mosaic))
-            if uncensored is True:
-                base = base.where(_metadata_linked_file_exists(_media_file_uncensored_predicate()))
-            elif uncensored is False:
-                base = base.where(~_metadata_linked_file_exists(_media_file_uncensored_predicate()))
+            if uncensored is not None:
+                flag = _metadata_uncensored_predicate()
+                base = base.where(flag if uncensored else ~flag)
             if definition is not None:
                 base = base.where(_metadata_linked_file_exists(col(MediaFile.definition) == definition))
             if content_type is not None:
-                base = base.where(_metadata_linked_file_exists(col(MediaFile.content_type) == content_type))
+                base = base.where(col(Metadata.content_type) == content_type)
             if updated_before is not None:
                 base = base.where(col(Metadata.updated_at) < updated_before)
 
@@ -232,17 +231,29 @@ class MetadataRepoMixin(RepositoryMixinBase):
             result = await session.exec(stmt)
             return result.first()
 
+    async def content_types_by_metadata_ids(self, metadata_ids: Sequence[int]) -> dict[int, ContentType]:
+        """文件行派生相位用; 不存在的 id 不在结果里, 调用方按"没有条目"处理."""
+        unique = list(dict.fromkeys(metadata_ids))
+        if not unique:
+            return {}
+        async with self._session() as session:
+            stmt = select(col(Metadata.id), col(Metadata.content_type)).where(col(Metadata.id).in_(unique))
+            rows = (await session.exec(stmt)).all()
+            return {row_id: content_type for row_id, content_type in rows if row_id is not None}
+
     async def upsert_metadata(
         self,
         number: str,
         *,
+        content_type: ContentType | None = None,
         actor_genders: Mapping[str, ActorGender] | None = None,
         **kwargs: Unpack[MetadataFields],
     ) -> Metadata:
-        """查重忽略大小写; 已存在时不改写 number 的原始大小写.
+        """查重忽略大小写; 已存在时不改写 number 的原始大小写, 也不改写类型.
         自动刮削写入; 锁定行为见 docs/dev/data-model.md.
         判定与写入同处一个写事务, 见 docs/dev/database.md; 临界区内不允许出现等待.
         ``actor_genders`` 只填 ``Actor.gender`` 空位, 不是 Metadata 列.
+        ``content_type`` 只在插入时落库, None 按番号推断; 已存在时不改写 (契约见 docs/dev/data-model.md).
         """
         fields = _normalize_text_fields(kwargs)
         async with self._session() as session:
@@ -266,7 +277,7 @@ class MetadataRepoMixin(RepositoryMixinBase):
                 await session.commit()
                 await session.refresh(existing)
                 return existing
-            meta = Metadata(number=number, **fields)
+            meta = Metadata(number=number, content_type=content_type or infer_content_type(number), **fields)
             session.add(meta)
             await session.flush()
             await clean_actor_names(session, meta, actor_genders)
