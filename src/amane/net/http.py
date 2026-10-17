@@ -573,6 +573,7 @@ class WebClient:
                     )
                 except RequestError as e:
                     return e.failure or RequestFailure(kind=FailureKind.UNEXPECTED, message=e.message)
+                # 不校验长度与 Content-Range: 上游忽略 Range 时返回整份内容, 这里按偏移写入, 落盘字节数与分片不符.
                 async with aiofiles.open(dest, "rb+") as f:
                     await f.seek(start)
                     await f.write(resp.content)
