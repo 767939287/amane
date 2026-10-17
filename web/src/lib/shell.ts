@@ -15,6 +15,16 @@ interface AmaneShellBridge {
   webViewPackage(): string;
   /** 报告触点处是否还有可以向上滚的内容, 供壳决定下拉刷新是否接管手势; 旧版壳没有这个方法. */
   setPageScrollableUp?(scrollableUp: boolean): void;
+  /** 系统媒体音量, 0..1; 旧版壳没有这一组方法. */
+  mediaVolume?(): number;
+  setMediaVolume?(value: number): void;
+  /** 系统媒体音量的一档大小; 与上一组一并出现, 但另行判空 —— 已装出去的壳可能只有上一组. */
+  mediaVolumeStep?(): number;
+  /** 窗口亮度, 0..1. */
+  screenBrightness?(): number;
+  setScreenBrightness?(value: number): void;
+  /** 交还系统亮度. */
+  clearScreenBrightness?(): void;
 }
 
 declare global {
@@ -94,4 +104,65 @@ export function shellSwitchServer(): boolean {
   if (!window.amaneshell) return false;
   window.amaneshell.switchServer();
   return true;
+}
+
+/**
+ * 壳内可直接写入的系统媒体音量与屏幕亮度.
+ *
+ * 页面没有设置这两个系统值的 API, 因此只在壳内存在; 取值与写入都经桥, 桥只能同步返回, 因此壳侧的读取
+ * 必须落在 JavaBridge 线程可读的字段上 (见 `BrowserActivity.screenBrightness`).
+ */
+export interface ShellSystemLevels {
+  /** 系统媒体音量, 0..1. */
+  volume(): number;
+  setVolume(value: number): void;
+  /**
+   * 系统媒体音量的一档大小 (1 / 档位数); 旧壳不提供时为 0, 调用方按值去重即可.
+   *
+   * 音量按档位生效: 一档之内写多少次都是同一个结果, 而每次写入都要跨进程进 AudioService,
+   * 因此调用方按它取整, 只在跨档时写.
+   */
+  volumeStep: number;
+  /** 窗口亮度, 0..1. */
+  brightness(): number;
+  setBrightness(value: number): void;
+  /** 交还系统亮度. */
+  clearBrightness(): void;
+}
+
+/**
+ * 取壳的系统音量与亮度接口; 桥不可用或壳版本早于这一组方法时返回 null.
+ *
+ * 返回 null 时调用方退回元素音量与画面叠加层: 浏览器内没有别的手段, 旧壳内则是降级.
+ */
+export function shellSystemLevels(): ShellSystemLevels | null {
+  const bridge = window.amaneshell;
+  if (bridge == null) return null;
+  const {
+    mediaVolume,
+    setMediaVolume,
+    screenBrightness,
+    setScreenBrightness,
+    clearScreenBrightness,
+  } = bridge;
+  if (
+    mediaVolume == null ||
+    setMediaVolume == null ||
+    screenBrightness == null ||
+    setScreenBrightness == null ||
+    clearScreenBrightness == null
+  ) {
+    return null;
+  }
+  // 以桥为接收者调用, 不假设 Java 桥的方法可以拆出来单调用.
+  // 档位是可选方法: 已装出去的壳没有它, 缺了只是不去重, 不影响音量本身.
+  const { mediaVolumeStep } = bridge;
+  return {
+    volume: () => mediaVolume.call(bridge),
+    setVolume: (value) => setMediaVolume.call(bridge, value),
+    volumeStep: mediaVolumeStep == null ? 0 : mediaVolumeStep.call(bridge),
+    brightness: () => screenBrightness.call(bridge),
+    setBrightness: (value) => setScreenBrightness.call(bridge, value),
+    clearBrightness: () => clearScreenBrightness.call(bridge),
+  };
 }
