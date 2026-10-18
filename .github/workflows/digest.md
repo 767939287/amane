@@ -8,6 +8,7 @@ on:
   cooldown: 22h
   # 每日上限: 当日已存在 open 的日报时跳过.
   skip-if-match: 'is:issue is:open label:report in:title "[日报]" created:>=2026-10-19'
+  # skip-if-no-match 下限见下
   # 数量门槛: 起始线之后未收录的条目不足 min 条时, 整个运行在
   # pre-activation 阶段终止, 不启动 runner, 不启动 agent, 待累计达到门槛.
   # 查询必须使用编译期字面量: 该检查排在 on.steps 之前, 无法取得本次运行计算的值.
