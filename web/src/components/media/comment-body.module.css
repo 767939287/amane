@@ -1,5 +1,6 @@
 /* 正文: 保留用户输入的换行, 长串 (URL 等) 不撑破卡片. */
 .body {
+  min-height: 56px;
   margin-top: 6px;
   color: var(--mantine-color-text);
   line-height: 1.65;
@@ -7,8 +8,28 @@
   overflow-wrap: anywhere;
 }
 
+.bodyCompact {
+  margin-top: 0;
+}
+
+/* 评论图片直接内联; 限制高度, 长图不撑开卡片. */
+.imageLink {
+  display: inline-block;
+  max-width: 100%;
+  margin: 8px 0;
+}
+
+.image {
+  display: block;
+  max-width: 100%;
+  max-height: 360px;
+  height: auto;
+  border-radius: var(--mantine-radius-sm);
+}
+
 /* 时间戳是正文里的跳转入口, 用浅色胶囊与正文分开; 颜色取品牌色的两端, 深色下比正文底色亮一档. */
-.timestamp {
+.timestamp,
+.timestampStatic {
   padding: 0 4px;
   border: 0;
   border-radius: 4px;
@@ -16,6 +37,9 @@
   font: inherit;
   font-weight: 600;
   color: light-dark(var(--mantine-color-brand-8), var(--mantine-color-brand-3));
+}
+
+.timestamp {
   cursor: pointer;
 }
 
@@ -26,6 +50,11 @@
 .timestamp:focus-visible {
   outline: 2px solid var(--mantine-color-brand-5);
   outline-offset: 1px;
+}
+
+/* 预览中的时间戳只保留样式, 不响应点击. */
+.timestampStatic {
+  cursor: default;
 }
 
 /* 当前没有可跳转的播放时保留时间戳的样子, 但不给点击. */
