@@ -3603,6 +3603,34 @@ export type RescrapeTarget = 'metadata' | 'actor';
 export type RoutineType = 'cleanup' | 'upscale' | 'r18_import' | 'rescrape';
 
 /**
+ * RuntimePaths
+ *
+ * 智能体可直接读取的位置; 供它自行查日志 / 配置 / 数据库, 不为这些能力做接口.
+ */
+export type RuntimePaths = {
+    /**
+     * Data Dir
+     */
+    data_dir: string;
+    /**
+     * Log Dir
+     */
+    log_dir: string;
+    /**
+     * Db Path
+     */
+    db_path: string;
+    /**
+     * Config Path
+     */
+    config_path: string;
+    /**
+     * Env
+     */
+    env: Array<string>;
+};
+
+/**
  * SavedQueryBatchAction
  */
 export type SavedQueryBatchAction = 'delete' | 'persist';
@@ -4708,6 +4736,18 @@ export type TextDeltaRow = {
 };
 
 /**
+ * ToolCallRequest
+ */
+export type ToolCallRequest = {
+    /**
+     * Args
+     */
+    args?: {
+        [key: string]: unknown;
+    };
+};
+
+/**
  * ToolCallRow
  *
  * 工具调用成形 (协议按增量传参, 这里已解析). 卡片的名字与参数由此行给出.
@@ -4740,6 +4780,47 @@ export type ToolCallRow = {
 };
 
 /**
+ * ToolCatalog
+ */
+export type ToolCatalog = {
+    /**
+     * Version
+     */
+    version: string;
+    paths: RuntimePaths;
+    /**
+     * Tools
+     */
+    tools: Array<ToolSummary>;
+};
+
+/**
+ * ToolDetail
+ *
+ * 单个工具的完整入参. 响应不声明返回 Schema, 调用方按实际响应体处理.
+ */
+export type ToolDetail = {
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Group
+     */
+    group: string;
+    /**
+     * Description
+     */
+    description: string;
+    /**
+     * Params
+     */
+    params: {
+        [key: string]: unknown;
+    };
+};
+
+/**
  * ToolResultRow
  *
  * 工具回执. 名字与参数在同 id 的 `ToolCallRow`, 故本行只带结果 (续批的回合不会再报调用名).
@@ -4762,6 +4843,30 @@ export type ToolResultRow = {
      */
     tool_call_id: string;
     result: JsonValue;
+};
+
+/**
+ * ToolSummary
+ *
+ * 目录索引里的一条: 够选工具, 不够直接构造复杂入参.
+ */
+export type ToolSummary = {
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Group
+     */
+    group: string;
+    /**
+     * Summary
+     */
+    summary: string;
+    /**
+     * Signature
+     */
+    signature: string;
 };
 
 /**
@@ -5111,6 +5216,22 @@ export type HealthCheckResponses = {
 };
 
 export type HealthCheckResponse = HealthCheckResponses[keyof HealthCheckResponses];
+
+export type GetAgentGuideData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/agent-guide';
+};
+
+export type GetAgentGuideResponses = {
+    /**
+     * Successful Response
+     */
+    200: string;
+};
+
+export type GetAgentGuideResponse = GetAgentGuideResponses[keyof GetAgentGuideResponses];
 
 export type GetConfigData = {
     body?: never;
@@ -8166,6 +8287,102 @@ export type GetTaskRecordResponses = {
      */
     200: unknown;
 };
+
+export type GetToolCatalogData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/tools';
+};
+
+export type GetToolCatalogResponses = {
+    /**
+     * Successful Response
+     */
+    200: ToolCatalog;
+};
+
+export type GetToolCatalogResponse = GetToolCatalogResponses[keyof GetToolCatalogResponses];
+
+export type GetToolDetailData = {
+    body?: never;
+    path: {
+        /**
+         * Name
+         */
+        name: string;
+    };
+    query?: never;
+    url: '/api/tools/{name}';
+};
+
+export type GetToolDetailErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type GetToolDetailError = GetToolDetailErrors[keyof GetToolDetailErrors];
+
+export type GetToolDetailResponses = {
+    /**
+     * Successful Response
+     */
+    200: ToolDetail;
+};
+
+export type GetToolDetailResponse = GetToolDetailResponses[keyof GetToolDetailResponses];
+
+export type CallToolData = {
+    body: ToolCallRequest;
+    path: {
+        /**
+         * Name
+         */
+        name: string;
+    };
+    query?: never;
+    url: '/api/tools/{name}';
+};
+
+export type CallToolErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type CallToolError = CallToolErrors[keyof CallToolErrors];
+
+export type CallToolResponses = {
+    /**
+     * Response Call Tool
+     *
+     * Successful Response
+     */
+    200: unknown;
+};
+
+export type GetDbSchemaData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/db-schema';
+};
+
+export type GetDbSchemaResponses = {
+    /**
+     * Response Get Db Schema
+     *
+     * Successful Response
+     */
+    200: {
+        [key: string]: string;
+    };
+};
+
+export type GetDbSchemaResponse = GetDbSchemaResponses[keyof GetDbSchemaResponses];
 
 export type GetPathTemplateSchemaData = {
     body?: never;

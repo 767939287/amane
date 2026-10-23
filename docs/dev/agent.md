@@ -94,3 +94,39 @@
 `AgentService` 挂载于 `AppRuntime`: `_rebuild()` 按 `hot.agent` 重建工厂, **不清除** ResultCache; bootstrap 装配 `bridge` (safe_dirs / watcher / 动态 Worker 取消 / `FeedService.poll_one`).
 
 上游协议由 `hot.agent.api_type` 选择, 模型构造与翻译共用 `llm/model.py::build_model`; `base_url` / `api_key` / `model` 原样交给对应 Provider (Anthropic 需填 Anthropic 端点, 无隐式改写). 身份与规则经 agent `instructions` 注入而**不是** `system_prompt`: Responses 协议把 agent instructions 放在 API 顶层 `instructions` 字段, 服务端插在 `input` 之前; `system_prompt` 会变成 `input` 里的 system 消息, 于是各 capability 的注意事项反而排在身份定位之前. 思考强度: 全局 `hot.agent.thinking` 为默认 (`None` = 不传), 会话覆盖在 `meta.json`; 每回合经由 `model_settings` 注入 thinking 与 `hot.agent.max_tokens`. 运行使用无上限的 `UsageLimits`.
+
+## 外部接入
+
+外部智能体 (用户自己的 CLI 工具) 经同一套工具定义管理实例, 入口 `src/amane/agent/external.py`. 目录按名字暴露工具, 派发按名字调用工具函数本体, **不重写任何领域逻辑**; 工具名因此是对外契约, 改名按破坏性变更处理.
+
+外部通道与内置助理有三处差异:
+
+- **无审批**: 派发始终以已批准的上下文执行, 工具内的闸门只对内置助理生效. 破坏性操作的约束交给工具描述与 Skill 的审批礼仪, 服务端不校验.
+- **无会话**: 依赖里的 `session_id` 为空, 交付的查询预设因此与会话解耦并直接 `persisted`; 探查视图落库但 `persisted=false`, 不出现在预设页, 只能按 `saved_query_id` 经 `inspect_result` 取行.
+- **不依赖模型配置**: 目录从工具组构造, 不经助理工厂, 未配置模型时照常可用.
+
+`GET /api/agent-guide` 免鉴权, 只回固定文本 (装 CLI / 鉴权 / 装 Skill / 约束), **不拼接实例地址、版本、路径或 token** — 实例地址由调用方从请求 URL 推得. 正文随发布更新, 不得引入任何随实例变化的内容. 免鉴权路径由 `middleware.py::_TOKEN_EXEMPT` 显式登记, 见 [api.md](api.md).
+
+日志、配置与数据库不设读取接口: `GET /api/tools` 的 `paths` 给出位置, 由调用方自行读文件; 无法访问实例文件系统时, 改用 `amane api /api/tasks/<id>/record` 取任务记录包.
+
+### 目录分级
+
+目录是模型上下文的主要成本, 按「什么时候需要」拆三级, 不一次给全:
+
+- `GET /api/tools` 索引: 每个工具一行 (名字、一行描述、参数签名), 约 1400 tokens, 够选工具.
+- `GET /api/tools/{name}` 详情: 单个工具的完整入参, 约 170 tokens, 参数不确定时才取.
+- `GET /api/db-schema` 库结构: 写只读 SQL 时才取.
+
+签名由 `src/amane/agent/signature.py` 从同一份 Schema 生成, 是有损的紧凑表示: 保留类型、必填性、枚举、数值范围与嵌套结构. 校验仍在服务端, 参数错了回字段路径, 这个闭环让有损压缩安全. 响应不声明返回 Schema, 调用方按实际响应体处理.
+
+Skill 只生成 `SKILL.md` 与记录 CLI 版本的 `version` 两个文件, 安装时不连接实例, 工具清单不进 Skill: 清单随实例变化, 写进文件既会过期, 又让每次会话都为全部工具付一遍 token; 运行时用 `amane catalog` 取.
+
+### 客户端
+
+`cli/` 是配套的 Go 命令行工具, 单一静态二进制, 只依赖标准库与 `golang.org/x/term` (读取密码不回显), 与服务器**零共享代码**. 命令表**不随工具变化** —— 它不认识任何工具名, 只把目录与派发端点当作目标, 因此新增工具不需要改 CLI.
+
+它存在的理由只有四条: 按 `--profile` 从 0600 配置文件读 token (token 因此不进入模型上下文; token 一律先校验一次, 连不上实例时把校验失败记为提示并照常写入; 本机地址另会读取桌面版留下的 token 文件, 不推断端口)、把嵌套入参经 `--file` 送出不经过 shell 引号、把任务轮询折叠成一次阻塞调用、自检并报告连不上的原因. 为每个工具生成子命令、渲染表格、重复校验入参、用退出码表达业务错误都不做.
+
+二进制经 GitHub Releases 分发, 不随实例或桌面包发布: 工具协议固定四个端点 (索引 / 详情 / 派发 / 库结构), 另有健康检查与桌面契约两个检查端点, 版本错配由 `doctor` 报告而不阻断. macOS 上必须用 `curl` 下载, 浏览器下载会带隔离属性而被 Gatekeeper 拦下.
+
+Go 由独立工作流 (`.github/workflows/cli.yaml`) 跑 `just cli-check`, 只在 `cli/` 变动时执行. CLI 的 recipe 在 `cli/justfile`, 由根 Justfile import, 与根一样同时兼容 sh 与 pwsh. `just check` 与 `just ci` 都不含它, 改完 CLI 要单独跑.

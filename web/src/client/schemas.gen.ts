@@ -6994,6 +6994,44 @@ export const RoutineTypeSchema = {
     title: 'RoutineType'
 } as const;
 
+export const RuntimePathsSchema = {
+    properties: {
+        data_dir: {
+            type: 'string',
+            title: 'Data Dir'
+        },
+        log_dir: {
+            type: 'string',
+            title: 'Log Dir'
+        },
+        db_path: {
+            type: 'string',
+            title: 'Db Path'
+        },
+        config_path: {
+            type: 'string',
+            title: 'Config Path'
+        },
+        env: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Env'
+        }
+    },
+    type: 'object',
+    required: [
+        'data_dir',
+        'log_dir',
+        'db_path',
+        'config_path',
+        'env'
+    ],
+    title: 'RuntimePaths',
+    description: '智能体可直接读取的位置; 供它自行查日志 / 配置 / 数据库, 不为这些能力做接口.'
+} as const;
+
 export const SavedQueryBatchActionSchema = {
     type: 'string',
     enum: [
@@ -9172,6 +9210,19 @@ export const TextDeltaRowSchema = {
     description: '正文增量; 归块同 `ReasoningDeltaRow`.'
 } as const;
 
+export const ToolCallRequestSchema = {
+    properties: {
+        args: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Args',
+            default: {}
+        }
+    },
+    type: 'object',
+    title: 'ToolCallRequest'
+} as const;
+
 export const ToolCallRowSchema = {
     properties: {
         seq: {
@@ -9218,6 +9269,63 @@ export const ToolCallRowSchema = {
     description: '工具调用成形 (协议按增量传参, 这里已解析). 卡片的名字与参数由此行给出.\n\n`args` 在生成的 TS 类型里退化为 `unknown` (pydantic 的 `JsonValue` 无法表达到 schema),\n类型层面的保证到后端为止.'
 } as const;
 
+export const ToolCatalogSchema = {
+    properties: {
+        version: {
+            type: 'string',
+            title: 'Version'
+        },
+        paths: {
+            $ref: '#/components/schemas/RuntimePaths'
+        },
+        tools: {
+            items: {
+                $ref: '#/components/schemas/ToolSummary'
+            },
+            type: 'array',
+            title: 'Tools'
+        }
+    },
+    type: 'object',
+    required: [
+        'version',
+        'paths',
+        'tools'
+    ],
+    title: 'ToolCatalog'
+} as const;
+
+export const ToolDetailSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            title: 'Name'
+        },
+        group: {
+            type: 'string',
+            title: 'Group'
+        },
+        description: {
+            type: 'string',
+            title: 'Description'
+        },
+        params: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Params'
+        }
+    },
+    type: 'object',
+    required: [
+        'name',
+        'group',
+        'description',
+        'params'
+    ],
+    title: 'ToolDetail',
+    description: '单个工具的完整入参. 响应不声明返回 Schema, 调用方按实际响应体处理.'
+} as const;
+
 export const ToolResultRowSchema = {
     properties: {
         seq: {
@@ -9257,6 +9365,36 @@ export const ToolResultRowSchema = {
     ],
     title: 'ToolResultRow',
     description: '工具回执. 名字与参数在同 id 的 `ToolCallRow`, 故本行只带结果 (续批的回合不会再报调用名).'
+} as const;
+
+export const ToolSummarySchema = {
+    properties: {
+        name: {
+            type: 'string',
+            title: 'Name'
+        },
+        group: {
+            type: 'string',
+            title: 'Group'
+        },
+        summary: {
+            type: 'string',
+            title: 'Summary'
+        },
+        signature: {
+            type: 'string',
+            title: 'Signature'
+        }
+    },
+    type: 'object',
+    required: [
+        'name',
+        'group',
+        'summary',
+        'signature'
+    ],
+    title: 'ToolSummary',
+    description: '目录索引里的一条: 够选工具, 不够直接构造复杂入参.'
 } as const;
 
 export const TrashSummaryResponseSchema = {

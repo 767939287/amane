@@ -49,7 +49,8 @@ class InspectResult(BaseModel):
 class AgentDeps:
     repo: Repository
     executor: QueryExecutor
-    session_id: int
+    session_id: int | None
+    """None = 外部派发: 交付的查询预设与会话解耦, 直接进入预设列表."""
     sql_timeout_ms: int
     sample_limit: int = 20
     bridge: AgentRuntimeBridge = field(default_factory=AgentRuntimeBridge)
@@ -90,11 +91,19 @@ async def materialize_saved_query(
     entity: SavedQueryEntity | None,
     name: str | None,
     description: str | None = None,
+    persisted: bool = False,
     result: SqlResult,
 ) -> tuple[int, str, list[int]]:
     """把全量 SQL 结果写成会话 SavedQuery 并入缓存.
 
     ``entity`` 省略按 ``DATA`` 落库: 不校验/不抽取 id, 只作数据表交付或探查视图.
+
+    外部派发没有会话 (``deps.session_id is None``). ``sql_deliver`` 因此在无会话时传
+    ``persisted=True``; 探查视图这条路径没有传, 行落在 ``session_id=NULL, persisted=false``,
+    既不属于任何会话 (删会话时不会被回收), 也不在预设页 (那里只列 persisted). 结果是每次
+    外部 ``create_view`` 都留下一行, 且用户看不见、删不掉. 清理需要一个大于结果缓存存活窗口
+    的截止时间, 单独处理.
+
     ``entity`` 为 metadata/actor 时按交付契约抽取 ``id`` 列 (缺失抛 ValueError).
     """
     entity = entity or SavedQueryEntity.DATA
@@ -108,7 +117,7 @@ async def materialize_saved_query(
         sql=sql,
         entity=entity,
         session_id=deps.session_id,
-        persisted=False,
+        persisted=persisted,
     )
     assert saved.id is not None
     deps.executor.cache.put(CachedResult(saved_query_id=saved.id, sql=sql, columns=result.columns, rows=result.rows))
@@ -216,6 +225,7 @@ def build_explore_toolset() -> FunctionToolset[AgentDeps]:
                 entity=entity,
                 name=name,
                 description=description,
+                persisted=ctx.deps.session_id is None,
                 result=result,
             )
         except ValueError as exc:

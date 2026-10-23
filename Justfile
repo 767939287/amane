@@ -4,10 +4,13 @@
 [windows]
 set shell := ["pwsh", "-NoProfile", "-Command"]
 
-default:
-    @just --list
+# CLI (Go) 的构建入口单独一份, 与根一样同时兼容 sh 与 pwsh
+import 'cli/justfile'
 
 CHECK_DIRS := "src/amane tests scripts"
+
+default:
+    @just --list
 
 host := env("AMANE_HOST", "127.0.0.1")
 port := env("AMANE_PORT", "8000")
@@ -124,6 +127,8 @@ _dev-servers: _dev-uvicorn _dev-web
 _dev-uvicorn:
     uv run uvicorn amane.api.app:create_app --factory --reload --host {{ host }} --port {{ port }}
 
+# 代理目标由 vite.config.ts 从 AMANE_PORT 读出, 因此端口可任意改; 前端代码不读 API 地址.
+[env('AMANE_PORT', port)]
 [working-directory('web')]
 _dev-web:
     pnpm dev
