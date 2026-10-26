@@ -8042,7 +8042,27 @@ export type SubmitTaskData = {
     /**
      * Req
      */
-    body: RefreshSubmission | OrganizeSubmission | ScanInvalidSubmission | DeleteSubmission | ScrapeSubmission | CleanupSubmission | UpscaleSubmission | R18ImportSubmission | ActorScrapeSubmission | RescrapeSubmission;
+    body: ({
+        type: 'refresh';
+    } & RefreshSubmission) | ({
+        type: 'organize';
+    } & OrganizeSubmission) | ({
+        type: 'scan_invalid';
+    } & ScanInvalidSubmission) | ({
+        type: 'delete';
+    } & DeleteSubmission) | ({
+        type: 'scrape';
+    } & ScrapeSubmission) | ({
+        type: 'cleanup';
+    } & CleanupSubmission) | ({
+        type: 'upscale';
+    } & UpscaleSubmission) | ({
+        type: 'r18_import';
+    } & R18ImportSubmission) | ({
+        type: 'actor_scrape';
+    } & ActorScrapeSubmission) | ({
+        type: 'rescrape';
+    } & RescrapeSubmission);
     path?: never;
     query?: never;
     url: '/api/tasks';

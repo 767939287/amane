@@ -5040,7 +5040,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "anyOf": [
+                "oneOf": [
                   {
                     "$ref": "#/components/schemas/RefreshSubmission"
                   },
@@ -5072,6 +5072,21 @@
                     "$ref": "#/components/schemas/RescrapeSubmission"
                   }
                 ],
+                "discriminator": {
+                  "propertyName": "type",
+                  "mapping": {
+                    "refresh": "#/components/schemas/RefreshSubmission",
+                    "organize": "#/components/schemas/OrganizeSubmission",
+                    "scan_invalid": "#/components/schemas/ScanInvalidSubmission",
+                    "delete": "#/components/schemas/DeleteSubmission",
+                    "scrape": "#/components/schemas/ScrapeSubmission",
+                    "cleanup": "#/components/schemas/CleanupSubmission",
+                    "upscale": "#/components/schemas/UpscaleSubmission",
+                    "r18_import": "#/components/schemas/R18ImportSubmission",
+                    "actor_scrape": "#/components/schemas/ActorScrapeSubmission",
+                    "rescrape": "#/components/schemas/RescrapeSubmission"
+                  }
+                },
                 "title": "Req"
               }
             }
