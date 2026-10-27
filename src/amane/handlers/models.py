@@ -324,6 +324,21 @@ class ActorScrapeResult(BaseModel):
     """各来源的结果明细; 与记录里的 summary 同源."""
 
 
+class ActorScrapeAllPayload(BaseModel):
+    """为全部演员各派生一个 ACTOR_SCRAPE; 本任务只选择目标, 不访问资料来源."""
+
+    use_cache: set[CacheKind] = Field(
+        default_factory=lambda: {CacheKind.metadata, CacheKind.trans},
+        description="派生的 ACTOR_SCRAPE 共用的缓存种类 (metadata: 复用 Actor.raw; trans: 预留译文). 空集 = 全部强制刷新",
+    )
+
+
+class ActorScrapeAllResult(BaseModel):
+    type: Literal[TaskType.ACTOR_SCRAPE_ALL] = TaskType.ACTOR_SCRAPE_ALL
+    submitted: int
+    """派生的 ACTOR_SCRAPE 条数; 演员已有 queued / running 任务时复用该行, 同样计入."""
+
+
 # --- MEDIA SERVER ---
 
 

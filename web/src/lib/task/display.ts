@@ -11,6 +11,7 @@ import {
   IconSearch,
   IconTrashX,
   IconUser,
+  IconUsers,
   IconZoomExclamation,
 } from "@tabler/icons-react";
 import type {
@@ -34,6 +35,7 @@ export const TASK_ICONS: Record<TaskType, Icon> = exhaustiveRecord<TaskType>()({
   upscale: IconArrowsDiagonal,
   r18_import: IconDatabase,
   actor_scrape: IconUser,
+  actor_scrape_all: IconUsers,
   actor_import: IconCloudDownload,
   actor_sync: IconCloudUpload,
   rescrape: IconRepeat,

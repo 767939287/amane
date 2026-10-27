@@ -14,8 +14,8 @@ from amane.crawlers.actor import ActorFetcher, ActorMetadata
 from amane.crawlers.block import FailureReason
 from amane.db.models import FacetKind, Task, TaskStatus, TaskType
 from amane.enums import ActorField, ActorGender, SiteName
-from amane.handlers.actor_scrape import ActorScrapeHandler
-from amane.handlers.models import ActorScrapePayload, CacheKind
+from amane.handlers.actor_scrape import ActorScrapeAllHandler, ActorScrapeHandler
+from amane.handlers.models import ActorScrapeAllPayload, ActorScrapePayload, CacheKind
 from amane.media import ResourceStore
 from amane.media.resource_store import RESOURCE_URL_PREFIX
 from amane.net.errors import SourceError
@@ -525,3 +525,33 @@ async def test_actor_scrape_unexpected_records_unexpected(repo: Repository, hot:
         assert rec.summary.outcomes["minnano"].reason == FailureReason.UNEXPECTED
     finally:
         rec.close()
+
+
+class TestActorScrapeAll:
+    """全部刮削只扇出 ACTOR_SCRAPE, 不访问资料来源."""
+
+    @pytest.mark.parametrize(
+        ("names", "use_cache"),
+        [
+            pytest.param([], {CacheKind.metadata}, id="no-actors"),
+            pytest.param(["Alice", "Bob"], {CacheKind.metadata, CacheKind.trans}, id="default-cache"),
+            pytest.param(["Carol"], set(), id="force-refresh"),
+        ],
+    )
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_fans_out_every_actor(self, repo: Repository, names: list[str], use_cache: set[CacheKind]) -> None:
+        for name in names:
+            await repo.upsert_metadata(number=f"AS-{name}", actors=[name])
+        actor_ids = await repo.list_actor_ids()
+        assert len(actor_ids) == len(names)
+
+        result = await ActorScrapeAllHandler(repo).handle(ActorScrapeAllPayload(use_cache=use_cache))
+        assert result.success
+        assert result.result is not None
+        assert result.result.submitted == len(names)
+        assert [f.payload["actor_id"] for f in result.followups] == actor_ids
+        assert {f.key for f in result.followups} == {f"actor-scrape:{i}" for i in actor_ids}
+        for followup in result.followups:
+            assert followup.task_type == TaskType.ACTOR_SCRAPE
+            assert followup.priority == 0
+            assert set(followup.payload["use_cache"]) == set(use_cache)

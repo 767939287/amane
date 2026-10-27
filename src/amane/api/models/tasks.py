@@ -9,6 +9,8 @@ from ...db import MediaFile, Repository, TaskStatus, TaskType
 from ...handlers import (
     ActorImportPayload,
     ActorImportResult,
+    ActorScrapeAllPayload,
+    ActorScrapeAllResult,
     ActorScrapeResult,
     ActorSyncPayload,
     ActorSyncResult,
@@ -54,6 +56,7 @@ TaskResultPayload = Annotated[
     | UpscaleResult
     | R18ImportResult
     | ActorScrapeResult
+    | ActorScrapeAllResult
     | ActorImportResult
     | ActorSyncResult
     | RescrapeResult,
@@ -261,6 +264,10 @@ class ActorScrapeSubmission(BaseModel):
     )
 
 
+class ActorScrapeAllSubmission(ActorScrapeAllPayload):
+    type: Literal["actor_scrape_all"]
+
+
 class ActorImportSubmission(ActorImportPayload):
     type: Literal["actor_import"]
 
@@ -279,6 +286,7 @@ TaskSubmission = Annotated[
     | UpscaleSubmission
     | R18ImportSubmission
     | ActorScrapeSubmission
+    | ActorScrapeAllSubmission
     | ActorImportSubmission
     | ActorSyncSubmission
     | RescrapeSubmission,

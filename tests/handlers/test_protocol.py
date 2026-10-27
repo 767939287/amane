@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from amane.handlers import models as handler_models
 from amane.handlers.models import (
     ActorImportResult,
+    ActorScrapeAllResult,
     ActorScrapeResult,
     ActorSyncResult,
     CleanupResult,
@@ -65,6 +66,7 @@ RESULT_CASES = [
         ),
         id="actor_scrape",
     ),
+    pytest.param(ActorScrapeAllResult(submitted=12), id="actor_scrape_all"),
     pytest.param(
         OrganizeResult(
             organized=2,

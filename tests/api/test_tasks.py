@@ -140,6 +140,12 @@ class TestSubmitTask:
         assert upscale.status_code == 202
         assert upscale.json()["payload"]["limit"] == 10
 
+        scrape_all = await client.post("tasks", json={"type": "actor_scrape_all"})
+        assert scrape_all.status_code == 202
+        assert sorted(scrape_all.json()["payload"]["use_cache"]) == ["metadata", "trans"]
+        forced_all = await client.post("tasks", json={"type": "actor_scrape_all", "use_cache": []})
+        assert forced_all.json()["payload"]["use_cache"] == []
+
         assert (await client.post("tasks", json={"type": "unknown"})).status_code == 422
         assert (await client.post("tasks", json={"library_id": 1})).status_code == 422
         assert (await client.post("tasks", json={"type": "refresh"})).status_code == 422

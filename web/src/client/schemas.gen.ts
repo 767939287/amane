@@ -406,6 +406,50 @@ export const ActorResponseSchema = {
     description: '详情填全量; 列表 (`GET /actors`) 只填卡片/表格字段, 其余 (简介/别名/标签/源字典/raw/锁) 为空.'
 } as const;
 
+export const ActorScrapeAllResultSchema = {
+    properties: {
+        type: {
+            type: 'string',
+            const: 'actor_scrape_all',
+            title: 'Type',
+            default: 'actor_scrape_all'
+        },
+        submitted: {
+            type: 'integer',
+            title: 'Submitted'
+        }
+    },
+    type: 'object',
+    required: [
+        'submitted'
+    ],
+    title: 'ActorScrapeAllResult'
+} as const;
+
+export const ActorScrapeAllSubmissionSchema = {
+    properties: {
+        use_cache: {
+            items: {
+                $ref: '#/components/schemas/CacheKind'
+            },
+            type: 'array',
+            uniqueItems: true,
+            title: 'Use Cache',
+            description: '派生的 ACTOR_SCRAPE 共用的缓存种类 (metadata: 复用 Actor.raw; trans: 预留译文). 空集 = 全部强制刷新'
+        },
+        type: {
+            type: 'string',
+            const: 'actor_scrape_all',
+            title: 'Type'
+        }
+    },
+    type: 'object',
+    required: [
+        'type'
+    ],
+    title: 'ActorScrapeAllSubmission'
+} as const;
+
 export const ActorScrapeRequestSchema = {
     properties: {
         use_cache: {
@@ -8967,6 +9011,9 @@ export const TaskBatchSubmitRequestSchema = {
                         $ref: '#/components/schemas/ActorScrapeSubmission'
                     },
                     {
+                        $ref: '#/components/schemas/ActorScrapeAllSubmission'
+                    },
+                    {
                         $ref: '#/components/schemas/ActorImportSubmission'
                     },
                     {
@@ -8981,6 +9028,7 @@ export const TaskBatchSubmitRequestSchema = {
                     mapping: {
                         actor_import: '#/components/schemas/ActorImportSubmission',
                         actor_scrape: '#/components/schemas/ActorScrapeSubmission',
+                        actor_scrape_all: '#/components/schemas/ActorScrapeAllSubmission',
                         actor_sync: '#/components/schemas/ActorSyncSubmission',
                         cleanup: '#/components/schemas/CleanupSubmission',
                         delete: '#/components/schemas/DeleteSubmission',
@@ -9472,6 +9520,9 @@ export const TaskResponseSchema = {
                             $ref: '#/components/schemas/ActorScrapeResult'
                         },
                         {
+                            $ref: '#/components/schemas/ActorScrapeAllResult'
+                        },
+                        {
                             $ref: '#/components/schemas/ActorImportResult'
                         },
                         {
@@ -9486,6 +9537,7 @@ export const TaskResponseSchema = {
                         mapping: {
                             actor_import: '#/components/schemas/ActorImportResult',
                             actor_scrape: '#/components/schemas/ActorScrapeResult',
+                            actor_scrape_all: '#/components/schemas/ActorScrapeAllResult',
                             actor_sync: '#/components/schemas/ActorSyncResult',
                             cleanup: '#/components/schemas/CleanupResult',
                             delete: '#/components/schemas/DeleteResult',
@@ -9550,6 +9602,7 @@ export const TaskTypeSchema = {
         'upscale',
         'r18_import',
         'actor_scrape',
+        'actor_scrape_all',
         'actor_import',
         'actor_sync',
         'rescrape',

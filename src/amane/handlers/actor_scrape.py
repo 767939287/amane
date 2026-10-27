@@ -6,6 +6,7 @@ from structlog.contextvars import bind_contextvars
 from ..aggregate import merge_actor_metadata, merge_actor_scrape_result
 from ..crawlers.actor import ActorFetcher, ActorMetadata, filter_sites_for_gender
 from ..crawlers.site_roles import is_actor_image_site, is_actor_profile_site
+from ..db import TaskType
 from ..db.actor_person import (
     actor_to_aggregated,
     apply_aggregated_to_actor,
@@ -16,8 +17,8 @@ from ..enums import SiteName
 from ..net.errors import FailureReason, SourceError
 from ..observability import current, invoke_source
 from ..observability.models import SiteOutcomeKind
-from .models import ActorScrapePayload, ActorScrapeResult, CacheKind
-from .protocol import TaskHandler, TaskResult
+from .models import ActorScrapeAllPayload, ActorScrapeAllResult, ActorScrapePayload, ActorScrapeResult, CacheKind
+from .protocol import FollowupTask, TaskHandler, TaskResult
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -213,6 +214,31 @@ class ActorScrapeHandler(TaskHandler[ActorScrapePayload, ActorScrapeResult]):
                 image_count=len(merged.image_urls),
                 outcomes=current().site_outcomes(),
             ),
+        )
+
+
+class ActorScrapeAllHandler(TaskHandler[ActorScrapeAllPayload, ActorScrapeAllResult]):
+    """为全部演员各派生一个 ACTOR_SCRAPE; 本任务不访问资料来源, 也不读写演员字段."""
+
+    def __init__(self, repo: Repository) -> None:
+        super().__init__(payload_t=ActorScrapeAllPayload, result_t=ActorScrapeAllResult)
+        self._repo = repo
+
+    async def handle(self, payload: ActorScrapeAllPayload) -> TaskResult[ActorScrapeAllResult]:
+        actor_ids = await self._repo.list_actor_ids()
+        followups = [
+            FollowupTask(
+                key=f"actor-scrape:{actor_id}",
+                task_type=TaskType.ACTOR_SCRAPE,
+                payload=ActorScrapePayload(actor_id=actor_id, use_cache=payload.use_cache).model_dump(mode="json"),
+            )
+            for actor_id in actor_ids
+        ]
+        current().info("actor scrape all fan-out", total=len(followups))
+        return TaskResult(
+            success=True,
+            result=ActorScrapeAllResult(submitted=len(followups)),
+            followups=followups,
         )
 
 

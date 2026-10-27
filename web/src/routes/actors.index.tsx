@@ -9,7 +9,14 @@ import {
   Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { IconCloudDownload, IconFilter, IconSearch, IconTable, IconX } from "@tabler/icons-react";
+import {
+  IconCloudDownload,
+  IconFilter,
+  IconSearch,
+  IconTable,
+  IconUserSearch,
+  IconX,
+} from "@tabler/icons-react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { createFileRoute, stripSearchParams } from "@tanstack/react-router";
 import type { ParseKeys } from "i18next";
@@ -50,6 +57,7 @@ import {
 import { useNarrowViewport } from "@/hooks/use-narrow-viewport";
 import { batchSubmitTasks } from "@/client/sdk.gen";
 import { extractErrorMessage } from "@/lib/api-error";
+import { confirm } from "@/lib/confirm";
 import { exhaustiveRecord } from "@/lib/exhaustive";
 import { ACTOR_SORT_FIELDS } from "@/lib/exhaustive-maps";
 import { nextOffsetPageParam } from "@/lib/infinite-list";
@@ -127,6 +135,7 @@ function ActorsIndexPage() {
   const [searchInput, setSearchInput] = useState(search.q ?? "");
   const [advancedOpen, setAdvancedOpen] = useState(hasNonDefaultFilters);
   const [importing, setImporting] = useState(false);
+  const [scrapingAll, setScrapingAll] = useState(false);
   const narrowViewport = useNarrowViewport("md");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -234,12 +243,50 @@ function ActorsIndexPage() {
     }
   }
 
+  async function handleScrapeAll() {
+    const ok = await confirm({
+      title: t("actors.scrapeAll"),
+      message: t("actors.scrapeAllConfirm", { count: total }),
+      confirmLabel: t("actors.scrapeAll"),
+      danger: false,
+    });
+    if (!ok) return;
+    setScrapingAll(true);
+    try {
+      const { data } = await batchSubmitTasks({
+        body: { submissions: [{ type: "actor_scrape_all" }] },
+        throwOnError: true,
+      });
+      notifications.show({
+        message:
+          data.submitted > 0 ? t("actors.scrapeAllQueued") : t("common:toast.operationFailed"),
+        color: data.submitted > 0 ? "blue" : "red",
+      });
+    } catch (err) {
+      notifications.show({
+        message: extractErrorMessage(err, t("common:toast.operationFailed")),
+        color: "red",
+      });
+    } finally {
+      setScrapingAll(false);
+    }
+  }
+
   return (
     <BrowsePageShell
       fill={isList}
       title={<Title order={2}>{t("actors.title")}</Title>}
       actions={
         <Group gap="xs">
+          <Button
+            size="xs"
+            variant="light"
+            leftSection={<IconUserSearch size={14} />}
+            loading={scrapingAll}
+            onClick={() => void handleScrapeAll()}
+          >
+            {t("actors.scrapeAll")}
+          </Button>
           <Button
             size="xs"
             variant="light"

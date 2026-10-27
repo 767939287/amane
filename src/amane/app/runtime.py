@@ -21,6 +21,7 @@ from ..db.models import TaskType
 from ..enums import BrowserBackendName, BrowserMode, SiteName
 from ..handlers import (
     ActorImportHandler,
+    ActorScrapeAllHandler,
     ActorScrapeHandler,
     ActorSyncHandler,
     CleanupHandler,
@@ -549,6 +550,7 @@ def build_handlers(
             dmm_prefix_store=(DmmPrefixStore(state_dir / "dmm_prefix_learned.json") if state_dir is not None else None),
         ),
         TaskType.ACTOR_SCRAPE: ActorScrapeHandler(repo, factory, resource_store, hot, web_client),
+        TaskType.ACTOR_SCRAPE_ALL: ActorScrapeAllHandler(repo),
         TaskType.ACTOR_IMPORT: ActorImportHandler(repo, hot, web_client),
         TaskType.ACTOR_SYNC: ActorSyncHandler(repo, hot, web_client, resource_store),
         TaskType.ORGANIZE: OrganizeHandler(

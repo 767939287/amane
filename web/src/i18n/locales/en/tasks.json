@@ -69,6 +69,7 @@
     "refresh": "Refresh",
     "r18_import": "R18 Import",
     "actor_scrape": "Actor Scrape",
+    "actor_scrape_all": "Actor Scrape All",
     "actor_import": "Server Import",
     "actor_sync": "Server Write-back",
     "rescrape": "Rescrape",
@@ -162,6 +163,7 @@
       "refresh": "Refresh",
       "r18_import": "R18 Import",
       "actor_scrape": "Actor Scrape",
+      "actor_scrape_all": "Scrape all actors",
       "actor_import": "Import server persons",
       "actor_sync": "Write to server",
       "rescrape": "Rescrape",
@@ -333,6 +335,18 @@
       }
     },
     "actor_import": {},
+    "actor_scrape_all": {
+      "use_cache": {
+        "label": "Use cache",
+        "description": "Shared by every derived actor scrape; unchecked items are refetched",
+        "$": {
+          "options": {
+            "metadata": "Metadata cache",
+            "trans": "Translation cache"
+          }
+        }
+      }
+    },
     "actor_sync": {
       "actor_ids": {
         "label": "Actor IDs",

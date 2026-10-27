@@ -44,6 +44,11 @@ class TestTaskSubmission:
         assert req.type == "actor_scrape"
         assert req.actor_id == 42
 
+    def test_dispatch_actor_scrape_all(self):
+        req = self.adapter.validate_python({"type": "actor_scrape_all"})
+        assert req.type == "actor_scrape_all"
+        assert req.use_cache == {"metadata", "trans"}
+
     def test_unknown_type_rejected(self):
         with pytest.raises(ValidationError):
             self.adapter.validate_python({"type": "unknown"})

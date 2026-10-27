@@ -39,6 +39,7 @@ class TaskType(StrEnum):
     UPSCALE = "upscale"
     R18_IMPORT = "r18_import"
     ACTOR_SCRAPE = "actor_scrape"
+    ACTOR_SCRAPE_ALL = "actor_scrape_all"
     ACTOR_IMPORT = "actor_import"
     ACTOR_SYNC = "actor_sync"
     RESCRAPE = "rescrape"

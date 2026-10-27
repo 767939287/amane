@@ -258,6 +258,36 @@ export type ActorResponse = {
 };
 
 /**
+ * ActorScrapeAllResult
+ */
+export type ActorScrapeAllResult = {
+    /**
+     * Type
+     */
+    type?: 'actor_scrape_all';
+    /**
+     * Submitted
+     */
+    submitted: number;
+};
+
+/**
+ * ActorScrapeAllSubmission
+ */
+export type ActorScrapeAllSubmission = {
+    /**
+     * Use Cache
+     *
+     * 派生的 ACTOR_SCRAPE 共用的缓存种类 (metadata: 复用 Actor.raw; trans: 预留译文). 空集 = 全部强制刷新
+     */
+    use_cache?: Array<CacheKind>;
+    /**
+     * Type
+     */
+    type: 'actor_scrape_all';
+};
+
+/**
  * ActorScrapeRequest
  */
 export type ActorScrapeRequest = {
@@ -4623,7 +4653,7 @@ export type TaskBatchSubmitRequest = {
     /**
      * Submissions
      */
-    submissions: Array<RefreshSubmission | OrganizeSubmission | ScanInvalidSubmission | DeleteSubmission | ScrapeSubmission | CleanupSubmission | UpscaleSubmission | R18ImportSubmission | ActorScrapeSubmission | ActorImportSubmission | ActorSyncSubmission | RescrapeSubmission>;
+    submissions: Array<RefreshSubmission | OrganizeSubmission | ScanInvalidSubmission | DeleteSubmission | ScrapeSubmission | CleanupSubmission | UpscaleSubmission | R18ImportSubmission | ActorScrapeSubmission | ActorScrapeAllSubmission | ActorImportSubmission | ActorSyncSubmission | RescrapeSubmission>;
 };
 
 /**
@@ -4881,6 +4911,8 @@ export type TaskResponse = {
     } & R18ImportResult) | ({
         type: 'actor_scrape';
     } & ActorScrapeResult) | ({
+        type: 'actor_scrape_all';
+    } & ActorScrapeAllResult) | ({
         type: 'actor_import';
     } & ActorImportResult) | ({
         type: 'actor_sync';
@@ -4902,7 +4934,7 @@ export type TaskStatus = 'queued' | 'running' | 'done' | 'failed';
 /**
  * TaskType
  */
-export type TaskType = 'scrape' | 'organize' | 'refresh' | 'cleanup' | 'upscale' | 'r18_import' | 'actor_scrape' | 'actor_import' | 'actor_sync' | 'rescrape' | 'scan_invalid' | 'delete';
+export type TaskType = 'scrape' | 'organize' | 'refresh' | 'cleanup' | 'upscale' | 'r18_import' | 'actor_scrape' | 'actor_scrape_all' | 'actor_import' | 'actor_sync' | 'rescrape' | 'scan_invalid' | 'delete';
 
 /**
  * TaskWorkerResponse
@@ -8268,6 +8300,8 @@ export type SubmitTaskData = {
     } & R18ImportSubmission) | ({
         type: 'actor_scrape';
     } & ActorScrapeSubmission) | ({
+        type: 'actor_scrape_all';
+    } & ActorScrapeAllSubmission) | ({
         type: 'actor_import';
     } & ActorImportSubmission) | ({
         type: 'actor_sync';

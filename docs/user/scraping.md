@@ -136,6 +136,7 @@ r18.dev 是一个特殊的离线数据源, 提供 PostgreSQL dump:
 | `SCRAPE` | 联网聚合元数据 |
 | `ORGANIZE` | 按路径模板整理已刮削文件 |
 | `ACTOR_SCRAPE` | 获取演员元数据 |
+| `ACTOR_SCRAPE_ALL` | 为全部演员各提交一次 `ACTOR_SCRAPE` |
 | `RESCRAPE` | 重新刮削: 滚动重刮最久未更新的影片或演员, 复用站点快照 |
 | `CLEANUP` | 清理悬空引用和失效文件 |
 | `UPSCALE` | 超分低清图片 |

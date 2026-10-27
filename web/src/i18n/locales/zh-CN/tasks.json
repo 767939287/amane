@@ -59,6 +59,7 @@
     "refresh": "扫描",
     "r18_import": "R18 导入",
     "actor_scrape": "演员刮削",
+    "actor_scrape_all": "演员全部刮削",
     "actor_import": "服务器导入",
     "actor_sync": "回写服务器",
     "rescrape": "重新刮削",
@@ -138,6 +139,7 @@
       "refresh": "扫描",
       "r18_import": "R18 导入",
       "actor_scrape": "演员刮削",
+      "actor_scrape_all": "演员全部刮削",
       "actor_import": "导入服务器人物",
       "actor_sync": "回写服务器",
       "rescrape": "重新刮削",
@@ -310,6 +312,18 @@
       }
     },
     "actor_import": {},
+    "actor_scrape_all": {
+      "use_cache": {
+        "label": "使用缓存",
+        "description": "派生的演员刮削共用的缓存; 不勾选则重新获取",
+        "$": {
+          "options": {
+            "metadata": "元数据缓存",
+            "trans": "译文缓存"
+          }
+        }
+      }
+    },
     "actor_sync": {
       "actor_ids": {
         "label": "演员 ID",

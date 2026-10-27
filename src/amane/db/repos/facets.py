@@ -282,6 +282,12 @@ class FacetsRepoMixin(RepositoryMixinBase):
             rows = (await session.exec(select(Actor.id, Actor.name).where(col(Actor.id).in_(ids)))).all()
             return {int(i): str(n) for i, n in rows if i is not None}
 
+    async def list_actor_ids(self) -> list[int]:
+        """全部演员 ID, 升序; 供批量扇出, 不读行内容."""
+        async with self._session() as session:
+            rows = (await session.exec(select(Actor.id).order_by(asc(col(Actor.id))))).all()
+            return [int(actor_id) for actor_id in rows if actor_id is not None]
+
     async def get_actors_by_names(self, names: Sequence[str]) -> list[Actor]:
         """按展示名批量查; 不存在的名字不出现."""
         unique = list(dict.fromkeys(n for n in names if n))
