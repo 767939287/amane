@@ -9,7 +9,8 @@
 ## 请求形状
 
 - 根路径按 `server_type` 区分: Emby 加 `/emby` 前缀, Jellyfin 用站点根; 用户只配置 host 与端口.
-- 鉴权用 `X-Emby-Token`, 两种服务器都接受; 出站一律经 `WebClient`, 超时取 `media_server.timeout`, 不走刮削限速.
+- 鉴权令牌放 `Authorization: MediaBrowser Client=…, Device=…, DeviceId=…, Version=…, Token=…`, 两种服务器都接受; Jellyfin 12 起默认关闭旧式鉴权, `X-Emby-Token` 仅为兼容老版本而保留, 不能当作唯一凭据. `DeviceId` 由地址派生并固定, 免得服务器侧反复新增设备记录.
+- 出站一律经 `WebClient`, 超时取 `media_server.timeout`, 不走刮削限速.
 - 人物列表走 `/Persons`, 按本次实际返回条数推进 `StartIndex`, 直到 `TotalRecordCount`; 服务器自行截断单页条数时不会漏页.
 
 ## 回写契约

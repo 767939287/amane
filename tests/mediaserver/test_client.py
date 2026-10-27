@@ -107,6 +107,36 @@ async def test_list_persons_stops_on_empty_page() -> None:
 
 
 @pytest.mark.asyncio(loop_scope="function")
+@pytest.mark.parametrize("server_type", [MediaServerType.EMBY, MediaServerType.JELLYFIN])
+async def test_authorization_header_carries_token(server_type: MediaServerType) -> None:
+    """Jellyfin 12 起默认关闭旧式鉴权, 只认 ``Authorization`` 里的令牌; 旧头留给老版本."""
+    web = _FakeWebClient()
+
+    await _client(web, _config(server_type)).refresh_person("9")
+
+    headers = web.calls[0][2]["headers"]
+    assert headers["X-Emby-Token"] == "secret"
+    assert headers["Authorization"].startswith('MediaBrowser Client="Amane"')
+    assert 'Token="secret"' in headers["Authorization"]
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_device_id_follows_base_url() -> None:
+    """设备标识随地址固定: 同一台服务器反复请求不新增设备记录, 换地址才是另一台."""
+    first, repeat, other = _FakeWebClient(), _FakeWebClient(), _FakeWebClient()
+    await _client(first).refresh_person("1")
+    await _client(repeat).refresh_person("1")
+    await _client(other, _config(base_url="http://nas:8097/")).refresh_person("1")
+
+    def device_id(web: _FakeWebClient) -> str:
+        auth = web.calls[0][2]["headers"]["Authorization"]
+        return auth.split('DeviceId="', 1)[1].split('"', 1)[0]
+
+    assert device_id(first) == device_id(repeat)
+    assert device_id(first) != device_id(other)
+
+
+@pytest.mark.asyncio(loop_scope="function")
 async def test_update_person_keeps_server_fields() -> None:
     """以服务端原条目为底稿, 只覆盖调用方给出的字段."""
     dto = {

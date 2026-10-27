@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import asyncio
 import mimetypes
+import uuid
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 import structlog
 
 from ..enums import MediaServerType
+from ..version import get_version
 from .models import MediaServerPerson
 
 if TYPE_CHECKING:
@@ -28,6 +30,14 @@ PERSON_PAGE_SIZE = 500
 """人物列表单页条数; 服务器按 TotalRecordCount 决定是否继续翻页."""
 
 _PERSON_FIELDS = "Overview,PremiereDate,Tags,ProviderIds,ImageTags,Taglines"
+
+_CLIENT_NAME = "Amane"
+_DEVICE_NAME = "Amane"
+
+
+def _device_id(base: str) -> str:
+    """设备标识按服务器地址固定, 否则服务器侧每台机器都会多一条设备记录."""
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, base))
 
 
 class MediaServerError(RuntimeError):
@@ -47,7 +57,22 @@ class MediaServerClient:
         return f"{base}/emby" if self._config.server_type is MediaServerType.EMBY else base
 
     def _headers(self, **extra: str) -> dict[str, str]:
-        return {"X-Emby-Token": self._config.api_key.strip(), "Accept": "application/json", **extra}
+        """Jellyfin 12 起默认不再接受 ``X-Emby-Token`` 等旧式鉴权, 令牌放进 ``Authorization``.
+
+        两种服务器都认 ``MediaBrowser`` 方案, 值经 URL 解码后使用. 旧头保留: 老版本只认它.
+        """
+        token = self._config.api_key.strip()
+        authorization = (
+            f'MediaBrowser Client="{_CLIENT_NAME}", Device="{_DEVICE_NAME}", '
+            f'DeviceId="{_device_id(self._config.base_url.strip())}", '
+            f'Version="{get_version()}", Token="{token}"'
+        )
+        return {
+            "X-Emby-Token": token,
+            "Authorization": authorization,
+            "Accept": "application/json",
+            **extra,
+        }
 
     async def _json(self, method: HttpMethod, url: str) -> Any:
         resp = await self._web_client.request(method, url, headers=self._headers(), timeout=self._config.timeout)
