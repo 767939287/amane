@@ -29,6 +29,7 @@ const NARROW_SELECT_MIN_OPTIONS = 4;
  * Segmented enum: sliding indicator, item separators; `fullWidth` fills the row.
  * 窄屏下 (宽度小于 sm) 且选项数大于 `NARROW_SELECT_MIN_OPTIONS` 时改用 `Select`,
  * 多选分支改为允许换行的按钮组.
+ * 宽屏但一行放不下时也换行: 根节点 `overflow: hidden`, 不换行则超出的选项被裁掉且点不到.
  */
 export function EnumToggle<T extends string | number>(
   props: EnumToggleSingle<T> | EnumToggleMultiple<T>,
@@ -105,6 +106,7 @@ export function EnumToggle<T extends string | number>(
       w={fullWidth ? undefined : "max-content"}
       maw="100%"
       styles={{
+        root: { flexWrap: "wrap", rowGap: "0.125rem" },
         control: fullWidth ? undefined : { flex: "0 0 auto" },
       }}
       value={props.value == null ? "" : String(props.value)}
