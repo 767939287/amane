@@ -19,6 +19,7 @@ import {
 import { notifications } from "@mantine/notifications";
 import {
   IconArrowMerge,
+  IconCloudUpload,
   IconDots,
   IconEraser,
   IconPencil,
@@ -212,6 +213,7 @@ export function ActorTable({
   const [batchScraping, setBatchScraping] = useState(false);
   const [batchGendering, setBatchGendering] = useState(false);
   const [batchClearing, setBatchClearing] = useState(false);
+  const [batchSyncing, setBatchSyncing] = useState(false);
   const [tagModalOpen, setTagModalOpen] = useState(false);
   const [tagIds, setTagIds] = useState<string[]>([]);
 
@@ -291,6 +293,28 @@ export function ActorTable({
       return;
     }
     await scrapeIds(ids, useCache);
+  }
+
+  async function handleBatchSync() {
+    if (selectedIds.length === 0) return;
+    setBatchSyncing(true);
+    try {
+      const { data } = await batchSubmitTasks({
+        body: { submissions: [{ type: "actor_sync", actor_ids: selectedIds }] },
+        throwOnError: true,
+      });
+      if (data.submitted > 0) {
+        notifications.show({ message: t("actors.syncQueued"), color: "blue" });
+        clear();
+      }
+    } catch (err) {
+      notifications.show({
+        message: extractErrorMessage(err, t("common:toast.operationFailed")),
+        color: "red",
+      });
+    } finally {
+      setBatchSyncing(false);
+    }
   }
 
   async function handleBatchGender(gender: ActorGender) {
@@ -381,7 +405,12 @@ export function ActorTable({
   const effectiveOrder = order ?? "asc";
   const allSelected = isAllSelected(pageIds);
   const busy =
-    batchScraping || batchGendering || batchClearing || identity.busy || batchTags.isPending;
+    batchScraping ||
+    batchGendering ||
+    batchClearing ||
+    batchSyncing ||
+    identity.busy ||
+    batchTags.isPending;
 
   function handlePageChange(p: number) {
     clear();
@@ -487,6 +516,16 @@ export function ActorTable({
               onClick={() => void handleClearPerson(selectedIds, { clearSelection: true })}
             >
               {t("actors.batchClearPerson")}
+            </Button>
+            <Button
+              size="xs"
+              variant="light"
+              leftSection={<IconCloudUpload size={14} />}
+              loading={batchSyncing}
+              disabled={selected.size === 0}
+              onClick={() => void handleBatchSync()}
+            >
+              {t("actors.syncToServer")}
             </Button>
           </SelectionBar>
         }

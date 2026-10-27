@@ -16,6 +16,7 @@ from amane.config import (
     ConfigManager,
     DownloadableResource,
     HotSettings,
+    MediaServerConfig,
     ScrapingConfig,
     SiteConfig,
     WatermarkConfig,
@@ -27,8 +28,14 @@ from amane.enums import (
     BrowserBackendName,
     BrowserMode,
     Language,
+    MediaServerType,
     MetadataField,
+    OverviewMode,
+    PlotMode,
+    PlotSeparator,
     SiteName,
+    SolverProtocol,
+    TagMergeMode,
     WatermarkCorner,
     WatermarkKind,
 )
@@ -236,6 +243,93 @@ class TestBrowserConfigValidation:
 
     def test_solver_url_accepts_https(self):
         assert BrowserConfig(solver_url="https://solver.local:8191").solver_url == "https://solver.local:8191"
+
+    def test_solver_protocol_defaults_to_flaresolverr(self):
+        assert BrowserConfig().solver_protocol is SolverProtocol.FLARESOLVERR
+
+    @pytest.mark.parametrize("value", ["flaresolverr", "trawl"])
+    def test_solver_protocol_accepts_known_values(self, value: str):
+        """配置来自 TOML, 字符串须能按枚举校验."""
+        assert BrowserConfig.model_validate({"solver_protocol": value}).solver_protocol == SolverProtocol(value)
+
+    def test_solver_protocol_rejects_unknown_value(self):
+        with pytest.raises(ValidationError):
+            BrowserConfig.model_validate({"solver_protocol": "byparr"})
+
+    def test_trusted_hosts_normalized(self):
+        cfg = BrowserConfig(trusted_hosts=[" HTTPS://A.Example/path ", "*.B.example", "a.example", ""])
+        assert cfg.trusted_hosts == ["a.example", "*.b.example"]
+
+    def test_blank_bypass_proxy_is_none(self):
+        assert BrowserConfig(bypass_proxy="  ").bypass_proxy is None
+
+
+class TestTagMerge:
+    def test_default_is_off(self):
+        assert ScrapingConfig().tag_merge is TagMergeMode.OFF
+
+    @pytest.mark.parametrize("value", ["off", "merge"])
+    def test_accepts_known_values(self, value: str):
+        """配置来自 TOML, 字符串须能按枚举校验."""
+        assert ScrapingConfig.model_validate({"tag_merge": value}).tag_merge is TagMergeMode(value)
+
+    def test_rejects_unknown_value(self):
+        with pytest.raises(ValidationError):
+            ScrapingConfig.model_validate({"tag_merge": "replace"})
+
+
+class TestPlotConfig:
+    def test_defaults(self):
+        config = ScrapingConfig()
+        assert config.plot_mode is PlotMode.SINGLE
+        assert config.plot_ja_sites == []
+        assert config.plot_zh_sites == []
+        assert config.plot_separator is PlotSeparator.BLANK_LINE
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [("plot_mode", "both"), ("plot_mode", "single"), ("plot_separator", "newline")],
+    )
+    def test_accepts_known_values(self, field: str, value: str):
+        assert str(getattr(ScrapingConfig.model_validate({field: value}), field)) == value
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [("plot_mode", "replace"), ("plot_separator", "comma")],
+    )
+    def test_rejects_unknown_value(self, field: str, value: str):
+        with pytest.raises(ValidationError):
+            ScrapingConfig.model_validate({field: value})
+
+    def test_plot_sites_must_be_film_sources(self):
+        """演员专用站不能出现在简介来源里."""
+        assert ScrapingConfig.model_validate({"plot_ja_sites": ["dmm"]}).plot_ja_sites == [SiteName.DMM]
+        with pytest.raises(ValidationError, match="plot_zh_sites"):
+            ScrapingConfig.model_validate({"plot_zh_sites": ["gfriends"]})
+
+
+class TestMediaServerConfig:
+    def test_defaults_disabled(self):
+        config = MediaServerConfig()
+        assert config.enabled is False
+        assert config.overview_mode is OverviewMode.APPEND_ORIGINAL
+
+    def test_disabled_allows_empty_endpoint(self):
+        """未启用时不校验地址, 用户可以先把 section 留着."""
+        assert MediaServerConfig(base_url="", api_key="").enabled is False
+
+    @pytest.mark.parametrize(
+        ("base_url", "api_key"),
+        [("", "key"), ("http://nas:8096", ""), ("  ", "  ")],
+    )
+    def test_enabled_requires_endpoint(self, base_url: str, api_key: str):
+        with pytest.raises(ValidationError, match="base_url 与 api_key 必填"):
+            MediaServerConfig(enabled=True, base_url=base_url, api_key=api_key)
+
+    def test_hot_settings_carries_section(self):
+        hot = HotSettings(media_server=MediaServerConfig(enabled=True, base_url="http://nas:8096", api_key="k"))
+        assert hot.media_server.enabled is True
+        assert hot.media_server.server_type is MediaServerType.EMBY
 
 
 class TestBrowserBackendAvailability:

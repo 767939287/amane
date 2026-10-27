@@ -39,6 +39,8 @@ class TaskType(StrEnum):
     UPSCALE = "upscale"
     R18_IMPORT = "r18_import"
     ACTOR_SCRAPE = "actor_scrape"
+    ACTOR_IMPORT = "actor_import"
+    ACTOR_SYNC = "actor_sync"
     RESCRAPE = "rescrape"
     SCAN_INVALID = "scan_invalid"
     DELETE = "delete"
@@ -259,6 +261,8 @@ class Metadata(SQLModel, table=True):
     series: str | None = Field(default=None, index=True)
     # 长文本存纯文本, 上游 HTML/实体在入库前经 utils.text 归一, 见 docs/dev/data-model.md.
     plot: str | None = None
+    #: ``plot_mode=both`` 时的日文段 (与 plot 同源归一); 供 NFO ``<originalplot>``.
+    plot_original: str | None = None
     directors: list[str] = Field(default_factory=list, sa_column=Column(JSON))
 
     poster_urls: list[str] = Field(default_factory=list, sa_column=Column(JSON))

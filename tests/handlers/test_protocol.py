@@ -14,7 +14,9 @@ from pydantic import BaseModel
 
 from amane.handlers import models as handler_models
 from amane.handlers.models import (
+    ActorImportResult,
     ActorScrapeResult,
+    ActorSyncResult,
     CleanupResult,
     DeleteResult,
     OrganizeResult,
@@ -83,6 +85,8 @@ RESULT_CASES = [
     pytest.param(UpscaleResult(scanned=3, upscaled=1, skipped=1, failed=1), id="upscale"),
     pytest.param(R18ImportResult(imported=True, etag=None), id="r18_import"),
     pytest.param(RescrapeResult(submitted=5, metadata=3, actors=2), id="rescrape"),
+    pytest.param(ActorImportResult(total=9, created=4, skipped=5, failed=0), id="actor_import"),
+    pytest.param(ActorSyncResult(synced=3, skipped=1, failed=1, missing=1, unmatched=2), id="actor_sync"),
     pytest.param(
         ScanInvalidResult(
             inventory_id="abc123",

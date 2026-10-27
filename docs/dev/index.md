@@ -14,6 +14,7 @@
 | 注释 / 文档 / 提交说明 / 对话 | [writing.md](writing.md) (遣词造句) · [terms.md](terms.md) (项目用词, 按需查) |
 | 爬虫 / 采集 fixture | [crawlers.md](crawlers.md) (含番号入参) · [crawler-testing.md](crawler-testing.md) |
 | 来源插件 (影片刮削 / 播放) | [plugins.md](plugins.md) · [crawlers.md](crawlers.md) |
+| 媒体服务器 (Emby / Jellyfin 人物) | [media-server.md](media-server.md) |
 | 站点覆盖 / 默认路由 | [content-routes.md](content-routes.md) |
 | API 端点 | [api.md](api.md) |
 | 前端文件索引 (路由 → 文件) | [frontend.md](frontend.md) |

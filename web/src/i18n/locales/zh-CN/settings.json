@@ -3,6 +3,7 @@
   "tabs": {
     "scraping": "影片刮削",
     "actor_scraping": "演员刮削",
+    "media_server": "媒体服务器",
     "agent": "智能体",
     "network": "网络",
     "worker": "任务引擎",
@@ -259,6 +260,153 @@
           }
         }
       },
+      "plot_mode": {
+        "label": "中日简介",
+        "description": "开启后简介由日文段和中文段拼成, 日文在前; 中文段优先取中文站原文, 缺失时翻译日文段",
+        "options": {
+          "single": "仅单段",
+          "both": "日文 + 中文"
+        }
+      },
+      "plot_ja_sites": {
+        "label": "日文简介来源",
+        "description": "只在类型路由内挑选, 顺序仍按剧情字段链; 留空表示不限站",
+        "options": {
+          "airav": "airav",
+          "avbase": "avbase",
+          "avsox": "avsox",
+          "dahlia": "dahlia",
+          "dmm": "dmm",
+          "faleno": "faleno",
+          "fc2": "fc2",
+          "fc2club": "fc2club",
+          "fc2ppvdb": "fc2ppvdb",
+          "freejavbt": "freejavbt",
+          "getchu": "getchu",
+          "giga": "giga",
+          "iqqtv": "iqqtv",
+          "jav321": "jav321",
+          "javbus": "javbus",
+          "javdb": "javdb",
+          "javlibrary": "javlibrary",
+          "kin8": "kin8",
+          "mgstage": "mgstage",
+          "official": "official",
+          "prestige": "prestige",
+          "r18dev": "r18dev",
+          "theporndb": "theporndb",
+          "xcity": "xcity"
+        },
+        "$": {
+          "options": {
+            "airav": "airav",
+            "avbase": "avbase",
+            "avsox": "avsox",
+            "dahlia": "dahlia",
+            "dmm": "dmm",
+            "faleno": "faleno",
+            "fc2": "fc2",
+            "fc2club": "fc2club",
+            "fc2ppvdb": "fc2ppvdb",
+            "freejavbt": "freejavbt",
+            "getchu": "getchu",
+            "giga": "giga",
+            "iqqtv": "iqqtv",
+            "jav321": "jav321",
+            "javbus": "javbus",
+            "javdb": "javdb",
+            "javlibrary": "javlibrary",
+            "kin8": "kin8",
+            "mgstage": "mgstage",
+            "official": "official",
+            "prestige": "prestige",
+            "r18dev": "r18dev",
+            "theporndb": "theporndb",
+            "xcity": "xcity"
+          }
+        }
+      },
+      "plot_zh_sites": {
+        "label": "中文简介来源",
+        "description": "留空表示不限站; 与日文段同源时改由翻译补齐",
+        "options": {
+          "airav": "airav",
+          "avbase": "avbase",
+          "avsox": "avsox",
+          "dahlia": "dahlia",
+          "dmm": "dmm",
+          "faleno": "faleno",
+          "fc2": "fc2",
+          "fc2club": "fc2club",
+          "fc2ppvdb": "fc2ppvdb",
+          "freejavbt": "freejavbt",
+          "getchu": "getchu",
+          "giga": "giga",
+          "iqqtv": "iqqtv",
+          "jav321": "jav321",
+          "javbus": "javbus",
+          "javdb": "javdb",
+          "javlibrary": "javlibrary",
+          "kin8": "kin8",
+          "mgstage": "mgstage",
+          "official": "official",
+          "prestige": "prestige",
+          "r18dev": "r18dev",
+          "theporndb": "theporndb",
+          "xcity": "xcity"
+        },
+        "$": {
+          "options": {
+            "airav": "airav",
+            "avbase": "avbase",
+            "avsox": "avsox",
+            "dahlia": "dahlia",
+            "dmm": "dmm",
+            "faleno": "faleno",
+            "fc2": "fc2",
+            "fc2club": "fc2club",
+            "fc2ppvdb": "fc2ppvdb",
+            "freejavbt": "freejavbt",
+            "getchu": "getchu",
+            "giga": "giga",
+            "iqqtv": "iqqtv",
+            "jav321": "jav321",
+            "javbus": "javbus",
+            "javdb": "javdb",
+            "javlibrary": "javlibrary",
+            "kin8": "kin8",
+            "mgstage": "mgstage",
+            "official": "official",
+            "prestige": "prestige",
+            "r18dev": "r18dev",
+            "theporndb": "theporndb",
+            "xcity": "xcity"
+          }
+        }
+      },
+      "plot_separator": {
+        "label": "中日简介分隔符",
+        "options": {
+          "blank_line": "空行",
+          "newline": "换行"
+        }
+      },
+      "tag_merge": {
+        "label": "标签跨源合并",
+        "description": "开启后按字段顺序合并各来源的标签, 首选来源的标签在前; 字段优先级与字段排除仍然生效",
+        "options": {
+          "off": "关闭",
+          "merge": "合并"
+        }
+      },
+      "dmm_image_fallback": {
+        "label": "DMM 官方图兜底",
+        "description": "按番号直构 DMM 官方高清图, 追加到海报与封面候选尾部; 厂牌前缀取自静态表与刮削期学习"
+      },
+      "mgstage_image_fallback": {
+        "label": "MGStage 官方图兜底",
+        "description": "按番号直构 MGStage 官方封面, 追加到海报与封面候选尾部; 只覆盖素人系列"
+      },
       "site_config": {
         "label": "站点配置",
         "description": "按站点单独设置",
@@ -494,7 +642,23 @@
         },
         "solver_url": {
           "label": "Solver 地址",
-          "description": "FlareSolverr 兼容服务地址, 仅 solver 后端使用"
+          "description": "CF 绕过服务地址 (FlareSolverr 或 TRAWL), 仅 solver 后端使用"
+        },
+        "solver_protocol": {
+          "label": "Solver 协议",
+          "description": "CF 绕过服务的接口协议, trawl 只支持 GET 页面",
+          "options": {
+            "flaresolverr": "FlareSolverr",
+            "trawl": "TRAWL"
+          }
+        },
+        "bypass_proxy": {
+          "label": "绕过代理",
+          "description": "只作用于 Solver 请求的上游代理, 留空表示直连"
+        },
+        "trusted_hosts": {
+          "label": "落地域名白名单",
+          "description": "Solver 返回的最终地址必须落在这些域名内, 支持 *.example.com; 留空不校验"
         }
       },
       "chunked_threshold": {
@@ -831,6 +995,64 @@
       "gfriends_repo": {
         "label": "gFriends 仓库",
         "description": "gFriends GitHub 仓库 URL"
+      }
+    },
+    "media_server": {
+      "enabled": {
+        "label": "启用媒体服务器",
+        "description": "导入服务器人物与回写人物资料都需要开启"
+      },
+      "server_type": {
+        "label": "服务器类型",
+        "description": "Emby 的 API 根路径带 /emby 前缀, Jellyfin 在站点根",
+        "options": {
+          "emby": "Emby",
+          "jellyfin": "Jellyfin"
+        }
+      },
+      "base_url": {
+        "label": "服务器地址",
+        "description": "只写到域名与端口, 不带 /emby 前缀"
+      },
+      "api_key": {
+        "label": "API 密钥",
+        "description": "在服务器控制台的 API 密钥页面签发"
+      },
+      "timeout": {
+        "label": "请求超时",
+        "description": "单次请求的秒数"
+      },
+      "import_missing_actors": {
+        "label": "导入缺失人物",
+        "description": "从服务器拉取全部人物, 只为本地缺失的建档; 关闭后导入任务直接失败"
+      },
+      "sync_overview": {
+        "label": "回写简介",
+        "description": "把本地人物简介写入服务器 Overview"
+      },
+      "overview_mode": {
+        "label": "简介回写方式",
+        "description": "追加方式保留服务器原简介作为经历, 重复回写不会叠加",
+        "options": {
+          "replace": "覆盖",
+          "append_original": "追加原简介"
+        }
+      },
+      "sync_birthday": {
+        "label": "回写生日",
+        "description": "写入服务器人物的首映日"
+      },
+      "sync_avatar": {
+        "label": "回写头像",
+        "description": "主图上传为服务器人物主图"
+      },
+      "sync_tags": {
+        "label": "回写标签",
+        "description": "本地用户标签并入服务器人物现有标签"
+      },
+      "sync_provider_ids": {
+        "label": "回写外部 ID",
+        "description": "本地人物外部 ID 并入服务器现有值"
       }
     },
     "plugins": {

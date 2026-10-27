@@ -4,10 +4,19 @@ from typing import TYPE_CHECKING, Protocol
 from structlog.contextvars import bind_contextvars
 
 from ..aggregate import SCALAR_FIELDS, AggregatedMetadata, CrawlerLike, FieldLanguage, aggregate, compile_priority
+from ..crawlers.fallback import (
+    cid_from_image_url,
+    dmm_cover_candidates,
+    dmm_poster_candidates,
+    is_uncensored_number,
+    mgstage_cover_candidates,
+    mgstage_poster_candidates,
+    series_of,
+)
 from ..crawlers.models import SearchQuery
 from ..crawlers.site_roles import builtin_descriptors
 from ..db.models import TaskType
-from ..enums import ActorGender, MetadataField
+from ..enums import ActorGender, MetadataField, PlotSeparator
 from ..media import materialize_images
 from ..observability import current
 from ..observability.models import SiteOutcomeKind
@@ -18,6 +27,7 @@ from .protocol import FollowupTask, TaskHandler, TaskResult
 
 if TYPE_CHECKING:
     from ..config import HotSettings
+    from ..crawlers.fallback import DmmPrefixStore
     from ..db.models import MediaFile
     from ..db.repository import Repository
     from ..llm import Translator
@@ -26,6 +36,29 @@ if TYPE_CHECKING:
 
 # 进度: 聚合按已满足标量字段计数; 其后固定两步 (物化图片 / 持久化).
 _PROGRESS_POST_STEPS = 2
+
+# 中日简介两段之间的实际分隔符; 配置只存语义名.
+_PLOT_SEPARATOR: dict[PlotSeparator, str] = {
+    PlotSeparator.BLANK_LINE: "\n\n",
+    PlotSeparator.NEWLINE: "\n",
+}
+
+
+def _has_zh_segment(metadata: AggregatedMetadata) -> bool:
+    """``plot_mode=both`` 的中文段取自中文站: 与日文段不同的那个值, 不再翻译."""
+    return metadata.plot_original is not None and metadata.plot != metadata.plot_original
+
+
+def _append_unique(target: list[str], extra: Iterable[str]) -> list[str]:
+    """把未出现过的地址追加到尾部, 保持两侧原有顺序."""
+    seen = set(target)
+    appended: list[str] = []
+    for url in extra:
+        if url in seen:
+            continue
+        seen.add(url)
+        appended.append(url)
+    return [*target, *appended]
 
 
 class CrawlerFactoryLike(Protocol):
@@ -44,6 +77,7 @@ class ScrapeHandler(TaskHandler[ScrapePayload, ScrapeResult]):
         web_client: WebClient | None = None,
         translator: Translator | None = None,
         source_catalog: Sequence[SourceDescriptor] | None = None,
+        dmm_prefix_store: DmmPrefixStore | None = None,
     ):
         super().__init__(payload_t=ScrapePayload, result_t=ScrapeResult)
         self._repo = repo
@@ -52,6 +86,7 @@ class ScrapeHandler(TaskHandler[ScrapePayload, ScrapeResult]):
         self._web_client = web_client
         self._resource_store = resource_store
         self._translator = translator
+        self._dmm_prefix_store = dmm_prefix_store
         # 调度事实只从来源目录读取: 内置来源的 descriptor 由 profile() 合成, 插件来源由插件声明.
         catalog = source_catalog if source_catalog is not None else builtin_descriptors()
         self._multi_language_sources = frozenset(d.id for d in catalog if SourceTrait.MULTI_LANGUAGE in d.traits)
@@ -121,6 +156,10 @@ class ScrapeHandler(TaskHandler[ScrapePayload, ScrapeResult]):
             on_progress=_on_fetch_progress,
             multi_lang_sites=self._multi_language_sources,
             deferred_sites=frozenset(name for name in crawlers if name in self._partial_sources),
+            tag_merge=self._config.scraping.tag_merge,
+            plot_mode=self._config.scraping.plot_mode,
+            plot_ja_sites=self._config.scraping.plot_ja_sites,
+            plot_zh_sites=self._config.scraping.plot_zh_sites,
         )
 
         # 站点结果已由引擎 _fetch_one 逐条上报到 summary.outcomes; 这里只记录调度顺序.
@@ -143,9 +182,12 @@ class ScrapeHandler(TaskHandler[ScrapePayload, ScrapeResult]):
         # 获取结束: 进度分子对齐标量字段数, 其后为物化与持久化.
         await self.report_progress(len(SCALAR_FIELDS), progress_total, "fetch")
 
+        await self._append_fallback_images(payload.number, result.metadata)
+
         # 翻译文本字段; 失败不阻断刮削.
         if self._translator is not None:
             await self._translate_metadata(result.metadata, field_language, CacheKind.trans in payload.use_cache)
+        self._merge_plot(result.metadata)
 
         # 物化到 Resource; 失败保留原始 URL.
         poster_out = result.metadata.poster_urls
@@ -186,6 +228,7 @@ class ScrapeHandler(TaskHandler[ScrapePayload, ScrapeResult]):
             tags=result.metadata.tags,
             series=result.metadata.series,
             plot=result.metadata.plot,
+            plot_original=result.metadata.plot_original,
             directors=result.metadata.directors,
             poster_urls=poster_out,
             thumb_urls=thumb_out,
@@ -239,6 +282,35 @@ class ScrapeHandler(TaskHandler[ScrapePayload, ScrapeResult]):
             failed_sites=[row.site for row in outcomes if row.outcome is SiteOutcomeKind.FAILED],
             outcomes=outcomes,
         )
+
+    async def _append_fallback_images(self, number: str, metadata: AggregatedMetadata) -> None:
+        """把官方图源直构候选追加到尾部, 并从已获取的 DMM 图学习厂牌前缀.
+
+        追加而不替换: 已有候选按原顺序先尝试, 兜底候选在它们全部失败后生效.
+        """
+        if self._dmm_prefix_store is not None:
+            for url in (*metadata.poster_urls, *metadata.thumb_urls):
+                cid = cid_from_image_url(url)
+                if cid is not None:
+                    await self._dmm_prefix_store.record_success(number, cid)
+
+        scraping = self._config.scraping
+        if scraping.dmm_image_fallback and not is_uncensored_number(number):
+            verified, provisional = await self._learned_prefixes(number)
+            metadata.poster_urls = _append_unique(
+                metadata.poster_urls, dmm_poster_candidates(number, verified=verified, provisional=provisional)
+            )
+            metadata.thumb_urls = _append_unique(
+                metadata.thumb_urls, dmm_cover_candidates(number, verified=verified, provisional=provisional)
+            )
+        if scraping.mgstage_image_fallback:
+            metadata.poster_urls = _append_unique(metadata.poster_urls, mgstage_poster_candidates(number))
+            metadata.thumb_urls = _append_unique(metadata.thumb_urls, mgstage_cover_candidates(number))
+
+    async def _learned_prefixes(self, number: str) -> tuple[list[str], list[str]]:
+        if self._dmm_prefix_store is None:
+            return [], []
+        return await self._dmm_prefix_store.learned(series_of(number))
 
     async def _auto_organize_followups(self, payload: ScrapePayload, file: MediaFile | None) -> list[FollowupTask]:
         """库开启自动整理时为本次刮削的那一个文件描述 ORGANIZE 后继.
@@ -301,6 +373,17 @@ class ScrapeHandler(TaskHandler[ScrapePayload, ScrapeResult]):
             current().warning("failed to build actor scrape followups", actors=actor_names)
             return []
 
+    def _merge_plot(self, metadata: AggregatedMetadata) -> None:
+        """``plot_mode=both``: 把日文段拼到中文段之前.
+
+        中文段与日文段同值时说明没有中文站原文且翻译未生效, 不再拼接 (避免同文重复).
+        """
+        original = metadata.plot_original
+        if original is None or not metadata.plot or metadata.plot == original:
+            return
+        separator = _PLOT_SEPARATOR[self._config.scraping.plot_separator]
+        metadata.plot = f"{original}{separator}{metadata.plot}"
+
     async def _translate_metadata(
         self, metadata: AggregatedMetadata, field_language: FieldLanguage, use_cache: bool
     ) -> None:
@@ -313,7 +396,7 @@ class ScrapeHandler(TaskHandler[ScrapePayload, ScrapeResult]):
             translated = await self._translate_field(metadata.title, field_language, MetadataField.TITLE, use_cache)
             if translated:
                 metadata.title = translated
-        if MetadataField.PLOT in fields and metadata.plot:
+        if MetadataField.PLOT in fields and metadata.plot and not _has_zh_segment(metadata):
             translated = await self._translate_field(metadata.plot, field_language, MetadataField.PLOT, use_cache)
             if translated:
                 metadata.plot = translated

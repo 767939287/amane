@@ -84,7 +84,9 @@ from .plugins import PluginConfigUpdate, PluginListResponse, PluginResponse
 from .schedules import ScheduleCreateRequest, ScheduleListResponse, ScheduleResponse, ScheduleUpdateRequest
 from .system import DesktopResponse, ReleaseResponse
 from .tasks import (
+    ActorImportSubmission,
     ActorScrapeSubmission,
+    ActorSyncSubmission,
     CleanupSubmission,
     DeleteSubmission,
     OrganizeSubmission,
@@ -117,11 +119,13 @@ __all__ = [
     "ActorClearPersonBatchResponse",
     "ActorGenderBatchRequest",
     "ActorGenderBatchResponse",
+    "ActorImportSubmission",
     "ActorListResponse",
     "ActorLocksRequest",
     "ActorResponse",
     "ActorScrapeRequest",
     "ActorScrapeSubmission",
+    "ActorSyncSubmission",
     "ActorUpdateRequest",
     "ActorUserTagsRequest",
     "CleanupSubmission",

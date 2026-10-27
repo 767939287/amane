@@ -28,6 +28,12 @@ _IMG_RAW: dict[str, dict[str, object]] = {
             {"title": "dmm title", "field_sources": {"title": "dmm"}},
         ),
         (
+            {"javdb": {"plot": "中文简介"}},
+            {},
+            {"plot": "javdb"},
+            {"plot": "中文简介", "plot_original": None, "field_sources": {"plot": "javdb"}},
+        ),
+        (
             {"javdb": {"score": 85.0}},
             {},
             {"score": "javdb"},
@@ -97,6 +103,7 @@ _IMG_RAW: dict[str, dict[str, object]] = {
     ],
     ids=[
         "scalar_title",
+        "plot_clears_original",
         "score_to_scores",
         "none_skipped",
         "empty_selections",

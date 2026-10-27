@@ -3,6 +3,7 @@
   "tabs": {
     "scraping": "Movie Scraping",
     "actor_scraping": "Actor Scraping",
+    "media_server": "Media Server",
     "agent": "Agent",
     "network": "Network",
     "worker": "Task Engine",
@@ -259,6 +260,153 @@
           }
         }
       },
+      "plot_mode": {
+        "label": "Plot Language Mix",
+        "description": "Combine a Japanese segment and a Chinese segment, Japanese first; the Chinese segment prefers a Chinese source and falls back to translation",
+        "options": {
+          "single": "Single",
+          "both": "Japanese + Chinese"
+        }
+      },
+      "plot_ja_sites": {
+        "label": "Japanese Plot Sources",
+        "description": "Picked from the type route only; order still follows the plot field chain; empty means any site",
+        "options": {
+          "airav": "airav",
+          "avbase": "avbase",
+          "avsox": "avsox",
+          "dahlia": "dahlia",
+          "dmm": "dmm",
+          "faleno": "faleno",
+          "fc2": "fc2",
+          "fc2club": "fc2club",
+          "fc2ppvdb": "fc2ppvdb",
+          "freejavbt": "freejavbt",
+          "getchu": "getchu",
+          "giga": "giga",
+          "iqqtv": "iqqtv",
+          "jav321": "jav321",
+          "javbus": "javbus",
+          "javdb": "javdb",
+          "javlibrary": "javlibrary",
+          "kin8": "kin8",
+          "mgstage": "mgstage",
+          "official": "official",
+          "prestige": "prestige",
+          "r18dev": "r18dev",
+          "theporndb": "theporndb",
+          "xcity": "xcity"
+        },
+        "$": {
+          "options": {
+            "airav": "airav",
+            "avbase": "avbase",
+            "avsox": "avsox",
+            "dahlia": "dahlia",
+            "dmm": "dmm",
+            "faleno": "faleno",
+            "fc2": "fc2",
+            "fc2club": "fc2club",
+            "fc2ppvdb": "fc2ppvdb",
+            "freejavbt": "freejavbt",
+            "getchu": "getchu",
+            "giga": "giga",
+            "iqqtv": "iqqtv",
+            "jav321": "jav321",
+            "javbus": "javbus",
+            "javdb": "javdb",
+            "javlibrary": "javlibrary",
+            "kin8": "kin8",
+            "mgstage": "mgstage",
+            "official": "official",
+            "prestige": "prestige",
+            "r18dev": "r18dev",
+            "theporndb": "theporndb",
+            "xcity": "xcity"
+          }
+        }
+      },
+      "plot_zh_sites": {
+        "label": "Chinese Plot Sources",
+        "description": "Empty means any site; when it resolves to the same text as the Japanese segment, translation fills in",
+        "options": {
+          "airav": "airav",
+          "avbase": "avbase",
+          "avsox": "avsox",
+          "dahlia": "dahlia",
+          "dmm": "dmm",
+          "faleno": "faleno",
+          "fc2": "fc2",
+          "fc2club": "fc2club",
+          "fc2ppvdb": "fc2ppvdb",
+          "freejavbt": "freejavbt",
+          "getchu": "getchu",
+          "giga": "giga",
+          "iqqtv": "iqqtv",
+          "jav321": "jav321",
+          "javbus": "javbus",
+          "javdb": "javdb",
+          "javlibrary": "javlibrary",
+          "kin8": "kin8",
+          "mgstage": "mgstage",
+          "official": "official",
+          "prestige": "prestige",
+          "r18dev": "r18dev",
+          "theporndb": "theporndb",
+          "xcity": "xcity"
+        },
+        "$": {
+          "options": {
+            "airav": "airav",
+            "avbase": "avbase",
+            "avsox": "avsox",
+            "dahlia": "dahlia",
+            "dmm": "dmm",
+            "faleno": "faleno",
+            "fc2": "fc2",
+            "fc2club": "fc2club",
+            "fc2ppvdb": "fc2ppvdb",
+            "freejavbt": "freejavbt",
+            "getchu": "getchu",
+            "giga": "giga",
+            "iqqtv": "iqqtv",
+            "jav321": "jav321",
+            "javbus": "javbus",
+            "javdb": "javdb",
+            "javlibrary": "javlibrary",
+            "kin8": "kin8",
+            "mgstage": "mgstage",
+            "official": "official",
+            "prestige": "prestige",
+            "r18dev": "r18dev",
+            "theporndb": "theporndb",
+            "xcity": "xcity"
+          }
+        }
+      },
+      "plot_separator": {
+        "label": "Plot Separator",
+        "options": {
+          "blank_line": "Blank line",
+          "newline": "New line"
+        }
+      },
+      "tag_merge": {
+        "label": "Cross-source Tag Merge",
+        "description": "Merge tags from every source in field order, keeping the preferred source first; field priority and blacklist still apply",
+        "options": {
+          "off": "Off",
+          "merge": "Merge"
+        }
+      },
+      "dmm_image_fallback": {
+        "label": "DMM Official Image Fallback",
+        "description": "Build DMM official high-resolution image URLs from the number and append them to the poster and thumb candidates; label prefixes come from a static table plus prefixes learned during scraping"
+      },
+      "mgstage_image_fallback": {
+        "label": "MGStage Official Image Fallback",
+        "description": "Build MGStage official cover URLs from the number and append them to the poster and thumb candidates; amateur series only"
+      },
       "site_config": {
         "label": "Site Configuration",
         "description": "Per-site settings",
@@ -494,7 +642,23 @@
         },
         "solver_url": {
           "label": "Solver URL",
-          "description": "FlareSolverr-compatible service URL; used by the solver backend only"
+          "description": "CF bypass service URL (FlareSolverr or TRAWL); used by the solver backend only"
+        },
+        "solver_protocol": {
+          "label": "Solver Protocol",
+          "description": "Interface protocol of the CF bypass service; trawl supports GET pages only",
+          "options": {
+            "flaresolverr": "FlareSolverr",
+            "trawl": "TRAWL"
+          }
+        },
+        "bypass_proxy": {
+          "label": "Bypass Proxy",
+          "description": "Upstream proxy used by solver requests only; empty means direct"
+        },
+        "trusted_hosts": {
+          "label": "Trusted Landing Hosts",
+          "description": "The final URL returned by the solver must match one of these hosts; *.example.com is supported. Empty disables the check"
         }
       },
       "chunked_threshold": {
@@ -831,6 +995,64 @@
       "gfriends_repo": {
         "label": "gFriends Repository",
         "description": "gFriends GitHub repository URL"
+      }
+    },
+    "media_server": {
+      "enabled": {
+        "label": "Enable media server",
+        "description": "Required for both person import and write-back"
+      },
+      "server_type": {
+        "label": "Server type",
+        "description": "Emby serves its API under /emby; Jellyfin serves it at the site root",
+        "options": {
+          "emby": "Emby",
+          "jellyfin": "Jellyfin"
+        }
+      },
+      "base_url": {
+        "label": "Server URL",
+        "description": "Host and port only; do not append /emby"
+      },
+      "api_key": {
+        "label": "API key",
+        "description": "Issue one from the server's API keys page"
+      },
+      "timeout": {
+        "label": "Request timeout",
+        "description": "Seconds per request"
+      },
+      "import_missing_actors": {
+        "label": "Import missing persons",
+        "description": "Pull every person from the server and create only the ones missing locally; when off, the import task fails"
+      },
+      "sync_overview": {
+        "label": "Write overview",
+        "description": "Write the local overview into the server Overview field"
+      },
+      "overview_mode": {
+        "label": "Overview mode",
+        "description": "Appending keeps the server's original overview as a biography section; repeated runs do not stack",
+        "options": {
+          "replace": "Replace",
+          "append_original": "Append original"
+        }
+      },
+      "sync_birthday": {
+        "label": "Write birthday",
+        "description": "Write the local birthday into the server PremiereDate field"
+      },
+      "sync_avatar": {
+        "label": "Write avatar",
+        "description": "Upload the primary image as the server person image"
+      },
+      "sync_tags": {
+        "label": "Write tags",
+        "description": "Merge local user tags into the server person tags"
+      },
+      "sync_provider_ids": {
+        "label": "Write provider IDs",
+        "description": "Merge local provider IDs into the server values"
       }
     },
     "plugins": {

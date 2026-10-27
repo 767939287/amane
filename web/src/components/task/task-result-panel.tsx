@@ -74,6 +74,8 @@ function resultBranch(result: TaskResult, failed: boolean): ReactNode {
     case "cleanup":
     case "upscale":
     case "r18_import":
+    case "actor_import":
+    case "actor_sync":
     case "rescrape":
     case "scan_invalid":
     case "delete":

@@ -39,6 +39,7 @@ class MetadataResponse(BaseModel):
     tags: list[str] = []
     series: str | None = None
     plot: str | None = None
+    plot_original: str | None = None
     directors: list[str] = []
     poster_url: str | None = None
     thumb_url: str | None = None
@@ -86,6 +87,7 @@ PartialMetadata = create_partial_model(
         "raw",
         "field_sources",
         "locked_fields",
+        "plot_original",
     ),
     json_schema_extras={
         "extrafanart_urls": anyof_extras(kv({"v-x-long": True})),

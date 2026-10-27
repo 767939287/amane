@@ -44,6 +44,9 @@ def compute_merge_updates(
 
         if field in SCALAR_FIELD_NAMES:
             field_sources_updates[field] = source
+        if field == "plot":
+            # 换了 plot 来源后旧日文段不再对应, 一并清掉, 避免 NFO 写出错的 <originalplot>.
+            updates["plot_original"] = None
 
     if field_sources_updates:
         updates["field_sources"] = {**field_sources, **field_sources_updates}

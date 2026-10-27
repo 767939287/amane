@@ -81,7 +81,7 @@ CrawlerFactory (缓存实例)
 
 `WebClient` 按 host 解析代理: `scraping.site_config[site].proxy` 覆盖全局 `network.proxy`; 站点 `use_proxy=false` 表示该站点的 host 直连, 站点代理与全局代理都不使用. host 取自来源 profile 的 URL 与配置的 `base_url`, 与限速器是同一份集合, 不在其中的 host (CDN 等) 仍走全局代理; 多个站点共享 host 时按注册顺序最后一次写入生效. 代理按请求传入, 会话与 cookie 不随代理拆分; 调用方传 `use_proxy=False` 时强制直连, 站点级配置不参与 (本机 solver 服务用).
 
-浏览器通道 (patchright / camoufox / solver) 只有全局 `network.proxy`: 本地后端的代理由浏览器启动参数决定, solver 的代理属于该服务自身配置. 站点代理与站点级 `use_proxy` 都不改变它, 因此浏览器池的重建判据仍只看全局配置.
+浏览器通道 (patchright / camoufox / solver) 的本地后端使用全局 `network.proxy` 作为浏览器启动参数; solver 服务自身的出站是本地直连, 其访问目标站的代理由 `network.browser.bypass_proxy` 单独指定, 与 `network.proxy` 和站点代理都无关. 因此浏览器池的重建判据仍只看 `network.browser` / `network.proxy`.
 
 ## 浏览器指纹与渲染
 
@@ -89,7 +89,7 @@ CrawlerFactory (缓存实例)
 
 Cloudflare managed challenge 只能执行 JS 越过, 因此受保护的来源经 `HttpClient.get_rendered` 经由浏览器: 后端由 `network.browser.backend` (`off` / `patchright` / `camoufox` / `solver`) 选择, 来源按 `SiteConfig.use_browser` 三档路由 (设置页可编辑): `auto` (默认) 先直连, 首次命中 `classify_block` 的 `cloudflare_challenge` 后该来源改用浏览器并保持; `always` 一律渲染; `off` 一律直连. `SiteConfig.browser_backend` 覆盖后端 (`off` 显式禁用; 可空枚举没有 UI 回退项, 覆盖只经 TOML/API 设置), 只在改用浏览器后生效; 仅 `always` 在无可用后端时于构造期告警. `get_html` 与基类 `check_connectivity` 按策略经由当前视图; `get_text` / `get_json` / `get_bytes` / `download` 仍直连 (浏览器后端只产出渲染后的 HTML, solver 同样不返回正文字节: 二进制下载没有浏览器回退, 被拦时只由指纹轮换处理), 自定义 `check_connectivity` 自选传输. 输出仍按 `net/errors.py::classify_block` 判定拦截, 后端自身的失败以 `RequestFailure.reason` 表达——挑战未解决归为 `cloudflare_challenge`, 不因缺少正文退化成通用错误.
 
-同一来源的连续请求复用同一个浏览器 context (solver 复用同名会话); 引擎惰性启动, camoufox 浏览器二进制在首次启动时下载, 空闲及进程退出 / 热重建时释放. 浏览器池只在 `network.browser` / `proxy` 变化时重建, 其余热重载保留已解决的 clearance; solver 经注入的 `WebClient` 出站, 地址来自 `network.browser.solver_url`, 不允许暴露到公网. FlareSolverr 的会话就是 solver 服务里的一张浏览器标签, 同一会话的并发页面请求会互相覆盖导航, 导致所有调用方读到同一份正文, 且以成功响应返回, 因此同一来源的并发渲染在 `SolverBackend` 里按会话排队.
+同一来源的连续请求复用同一个浏览器 context (solver 复用同名会话); 引擎惰性启动, camoufox 浏览器二进制在首次启动时下载, 空闲及进程退出 / 热重建时释放. 浏览器池只在 `network.browser` / `proxy` 变化时重建, 其余热重载保留已解决的 clearance; solver 经注入的 `WebClient` 出站, 地址来自 `network.browser.solver_url`, 不允许暴露到公网. `network.browser.solver_protocol` 选择服务协议: `flaresolverr` 走 `/v1` 请求体并复用会话, `trawl` 走 `/scrape` 且无会话. 两种协议都只服务 GET 渲染, POST 不经过 solver. `trusted_hosts` 非空时校验返回的落地地址, 不匹配即拒绝回填. 连接失败与 429/5xx 连续三次进入五分钟冷却, 期内直接失败, 不再空等. FlareSolverr 的会话就是 solver 服务里的一张浏览器标签, 同一会话的并发页面请求会互相覆盖导航, 导致所有调用方读到同一份正文, 且以成功响应返回, 因此同一来源的并发渲染在 `SolverBackend` 里按会话排队.
 
 改用浏览器的来源 (auto 切换后或 always) 实际入口不是 `base_url` 时必须覆盖 `check_connectivity` (如 minnano 探测 `search_result.php`), 否则首页可达会掩盖入口不可达. 插件来源没有浏览器入口, 始终使用 HTTP. `browser` 可选依赖不随 Docker 与桌面打包分发, 这两处只能用 `solver`.
 
@@ -125,3 +125,14 @@ Cloudflare managed challenge 只能执行 JS 越过, 因此受保护的来源经
 `pics` (标准) 与 `aws` (高清) 存同一份文件的两套路径: `mono/movie/` 下 pics 多一层被 CDN 忽略的分类目录 (`adult` / `japanese`), aws 只接受省去该层的路径, 其余分类 (e-book 等) 没有 aws 副本. 地址上的缩放查询串会让 aws 返回缩略图, 一律去掉; 规则在 `sites/dmm_cdn.py`, 由 DMM 详情页与 r18 dump 共用, 候选按高清在前、标准兜底排列.
 
 **aws 地址多数柜台本来就给**: digital / FANZA TV 的接口直接返回, 月額 (見放題) 页面在样品图块里引用封面与剧照, 两者原样使用, 不再追加推导的地址. 只有通販 (mono) 与レンタル页面从不引用 aws, 高清地址在那里只能由 pics 地址推导; 检索优先选配信条目, 落到推导这一支的是没有配信条目的纯 DVD 片.
+
+## 官方图源直构兜底
+
+`src/amane/crawlers/fallback/` 在站点图源不可用时按番号构造官方 CDN 地址. 候选在聚合之后、物化之前追加到 `poster_urls` / `thumb_urls` 的尾部 (DMM 竖版 `ps` 进海报链, 横版 `pl` 进封面链; MGStage 竖版 `pf_e` 进海报链, 横版 `pb_e` 进封面链), 已有候选保留原顺序先试, 因此兜底只在它们全部失败后生效. 两个开关互相独立, 均默认关闭.
+
+**DMM 前缀**: cid = 厂牌前缀 + 系列名 + 五位补零编号, 前缀无法从番号推出. 静态表 (`fallback/dmm.py::prefixes_for`) 覆盖主流系列, 含阈值切换与跨厂商附加前缀; 未收录系列退化为通用前缀枚举. 无码番号不生成候选.
+
+**学习表** (`fallback/prefix_learn.py::DmmPrefixStore`): 刮削期从真实 DMM digital 图地址反解「系列 → 前缀」, 同一前缀在 2 个不同番号上出现后转正, 转正前缀排在静态表之前. 存储在 `{cold.data_dir}/dmm_prefix_learned.json`, 原子替换写入; 文件损坏时本次运行只用内存表且不覆盖原文件. **只学 digital 路径**, mono 老片的 cid 属于独立编号空间, 学到会污染新片候选. 不复制 libredmm 全站路由种子, 特殊编号形态只能靠静态表与学习表覆盖.
+
+**MGStage** (`fallback/mgstage.py`): 只认素人系列表, 未知系列不产生候选; 编号保留与去零两种写法都作为候选.
+

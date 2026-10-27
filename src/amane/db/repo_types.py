@@ -288,6 +288,7 @@ class MetadataFields(TypedDict, total=False):
     tags: list[str]
     series: str | None
     plot: str | None
+    plot_original: str | None
     directors: list[str]
     poster_urls: list[str]
     thumb_urls: list[str]

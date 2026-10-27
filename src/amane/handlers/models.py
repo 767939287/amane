@@ -324,6 +324,39 @@ class ActorScrapeResult(BaseModel):
     """各来源的结果明细; 与记录里的 summary 同源."""
 
 
+# --- MEDIA SERVER ---
+
+
+class ActorImportPayload(BaseModel):
+    """拉取服务器全部人物, 只为本地缺失的建档."""
+
+
+class ActorImportResult(BaseModel):
+    type: Literal[TaskType.ACTOR_IMPORT] = TaskType.ACTOR_IMPORT
+    total: int = 0
+    """服务器返回的人物数."""
+    created: int = 0
+    skipped: int = 0
+    """本地已有同名 (展示名或别名) 人物, 未覆盖."""
+    failed: int = 0
+
+
+class ActorSyncPayload(BaseModel):
+    actor_ids: list[int] = Field(min_length=1, max_length=1000, description="要回写的演员 ID")
+
+
+class ActorSyncResult(BaseModel):
+    type: Literal[TaskType.ACTOR_SYNC] = TaskType.ACTOR_SYNC
+    synced: int = 0
+    skipped: int = 0
+    """本地没有可写内容 (简介 / 生日 / 头像 / 标签 / ProviderIds 均空)."""
+    failed: int = 0
+    missing: int = 0
+    """本地演员不存在."""
+    unmatched: int = 0
+    """服务器上没有同名人物; 需先在服务器侧有该人物才能回写."""
+
+
 # --- RESCRAPE ---
 
 

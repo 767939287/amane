@@ -87,6 +87,42 @@ export type ActorGenderBatchResponse = {
 };
 
 /**
+ * ActorImportResult
+ */
+export type ActorImportResult = {
+    /**
+     * Type
+     */
+    type?: 'actor_import';
+    /**
+     * Total
+     */
+    total?: number;
+    /**
+     * Created
+     */
+    created?: number;
+    /**
+     * Skipped
+     */
+    skipped?: number;
+    /**
+     * Failed
+     */
+    failed?: number;
+};
+
+/**
+ * ActorImportSubmission
+ */
+export type ActorImportSubmission = {
+    /**
+     * Type
+     */
+    type: 'actor_import';
+};
+
+/**
  * ActorListResponse
  */
 export type ActorListResponse = {
@@ -325,6 +361,52 @@ export type ActorScrapingConfig = {
  * ActorSortField
  */
 export type ActorSortField = 'name' | 'count' | 'updated_at' | 'has_image' | 'birthday' | 'height' | 'bust' | 'waist' | 'hip' | 'cup';
+
+/**
+ * ActorSyncResult
+ */
+export type ActorSyncResult = {
+    /**
+     * Type
+     */
+    type?: 'actor_sync';
+    /**
+     * Synced
+     */
+    synced?: number;
+    /**
+     * Skipped
+     */
+    skipped?: number;
+    /**
+     * Failed
+     */
+    failed?: number;
+    /**
+     * Missing
+     */
+    missing?: number;
+    /**
+     * Unmatched
+     */
+    unmatched?: number;
+};
+
+/**
+ * ActorSyncSubmission
+ */
+export type ActorSyncSubmission = {
+    /**
+     * Actor Ids
+     *
+     * 要回写的演员 ID
+     */
+    actor_ids: Array<number>;
+    /**
+     * Type
+     */
+    type: 'actor_sync';
+};
 
 /**
  * ActorUpdateRequest
@@ -657,6 +739,15 @@ export type BrowserConfig = {
      * Solver Url
      */
     solver_url?: string;
+    solver_protocol?: SolverProtocol;
+    /**
+     * Bypass Proxy
+     */
+    bypass_proxy?: string | null;
+    /**
+     * Trusted Hosts
+     */
+    trusted_hosts?: Array<string>;
 };
 
 /**
@@ -1688,6 +1779,7 @@ export type HealthResponse = {
 export type HotSettings = {
     scraping?: ScrapingConfig;
     actor_scraping?: ActorScrapingConfig;
+    media_server?: MediaServerConfig;
     agent?: AgentConfig;
     network?: NetworkConfig;
     sr?: SrConfig;
@@ -2441,6 +2533,65 @@ export type MediaListResponse = {
 };
 
 /**
+ * MediaServerConfig
+ *
+ * 单台 Emby / Jellyfin; 演员导入与回写共用.
+ */
+export type MediaServerConfig = {
+    /**
+     * Enabled
+     */
+    enabled?: boolean;
+    server_type?: MediaServerType;
+    /**
+     * Base Url
+     *
+     * 服务地址, 不含 /emby 前缀
+     */
+    base_url?: string;
+    /**
+     * Api Key
+     *
+     * 服务端签发的 API 密钥
+     */
+    api_key?: string;
+    /**
+     * Timeout
+     */
+    timeout?: number;
+    /**
+     * Import Missing Actors
+     */
+    import_missing_actors?: boolean;
+    /**
+     * Sync Overview
+     */
+    sync_overview?: boolean;
+    overview_mode?: OverviewMode;
+    /**
+     * Sync Birthday
+     */
+    sync_birthday?: boolean;
+    /**
+     * Sync Avatar
+     */
+    sync_avatar?: boolean;
+    /**
+     * Sync Tags
+     */
+    sync_tags?: boolean;
+    /**
+     * Sync Provider Ids
+     */
+    sync_provider_ids?: boolean;
+};
+
+/**
+ * MediaServerType
+ */
+export type MediaServerType = 'emby' | 'jellyfin';
+
+/**
  * MediaSortField
  */
 export type MediaSortField = 'number' | 'path' | 'status' | 'size' | 'created_at' | 'updated_at';
@@ -2754,6 +2905,10 @@ export type MetadataResponse = {
      * Plot
      */
     plot?: string | null;
+    /**
+     * Plot Original
+     */
+    plot_original?: string | null;
     /**
      * Directors
      */
@@ -3078,6 +3233,11 @@ export type OrganizeSubmission = {
 };
 
 /**
+ * OverviewMode
+ */
+export type OverviewMode = 'replace' | 'append_original';
+
+/**
  * PathTemplatePlaceholder
  */
 export type PathTemplatePlaceholder = {
@@ -3217,6 +3377,16 @@ export type PlaybackSubtitleItem = {
      */
     href: string;
 };
+
+/**
+ * PlotMode
+ */
+export type PlotMode = 'single' | 'both';
+
+/**
+ * PlotSeparator
+ */
+export type PlotSeparator = 'blank_line' | 'newline';
 
 /**
  * PluginConfig
@@ -4090,6 +4260,29 @@ export type ScrapingConfig = {
     field_language?: {
         [key in MetadataField]?: Language;
     };
+    plot_mode?: PlotMode;
+    /**
+     * Plot Ja Sites
+     *
+     * 日文简介候选站; 空表示不限站
+     */
+    plot_ja_sites?: Array<'airav' | 'avbase' | 'avsox' | 'dahlia' | 'dmm' | 'faleno' | 'fc2' | 'fc2club' | 'fc2ppvdb' | 'freejavbt' | 'getchu' | 'giga' | 'iqqtv' | 'jav321' | 'javbus' | 'javdb' | 'javlibrary' | 'kin8' | 'mgstage' | 'official' | 'prestige' | 'r18dev' | 'theporndb' | 'xcity'>;
+    /**
+     * Plot Zh Sites
+     *
+     * 中文简介候选站; 空表示不限站
+     */
+    plot_zh_sites?: Array<'airav' | 'avbase' | 'avsox' | 'dahlia' | 'dmm' | 'faleno' | 'fc2' | 'fc2club' | 'fc2ppvdb' | 'freejavbt' | 'getchu' | 'giga' | 'iqqtv' | 'jav321' | 'javbus' | 'javdb' | 'javlibrary' | 'kin8' | 'mgstage' | 'official' | 'prestige' | 'r18dev' | 'theporndb' | 'xcity'>;
+    plot_separator?: PlotSeparator;
+    tag_merge?: TagMergeMode;
+    /**
+     * Dmm Image Fallback
+     */
+    dmm_image_fallback?: boolean;
+    /**
+     * Mgstage Image Fallback
+     */
+    mgstage_image_fallback?: boolean;
     /**
      * Site Config
      */
@@ -4262,6 +4455,11 @@ export type SiteOutcomeRecord = {
 export type SkipReason = 'unknown_source' | 'no_http_upstream' | 'missing_credential' | 'undeclared' | 'no_url';
 
 /**
+ * SolverProtocol
+ */
+export type SolverProtocol = 'flaresolverr' | 'trawl';
+
+/**
  * SortOrder
  */
 export type SortOrder = 'asc' | 'desc';
@@ -4362,6 +4560,11 @@ export type SrConfig = {
 export type SrPreset = 'realesr-photo-4x' | 'waifu-photo-2x';
 
 /**
+ * TagMergeMode
+ */
+export type TagMergeMode = 'off' | 'merge';
+
+/**
  * TaskBatchAction
  */
 export type TaskBatchAction = 'cancel' | 'delete' | 'retry';
@@ -4420,7 +4623,7 @@ export type TaskBatchSubmitRequest = {
     /**
      * Submissions
      */
-    submissions: Array<RefreshSubmission | OrganizeSubmission | ScanInvalidSubmission | DeleteSubmission | ScrapeSubmission | CleanupSubmission | UpscaleSubmission | R18ImportSubmission | ActorScrapeSubmission | RescrapeSubmission>;
+    submissions: Array<RefreshSubmission | OrganizeSubmission | ScanInvalidSubmission | DeleteSubmission | ScrapeSubmission | CleanupSubmission | UpscaleSubmission | R18ImportSubmission | ActorScrapeSubmission | ActorImportSubmission | ActorSyncSubmission | RescrapeSubmission>;
 };
 
 /**
@@ -4678,6 +4881,10 @@ export type TaskResponse = {
     } & R18ImportResult) | ({
         type: 'actor_scrape';
     } & ActorScrapeResult) | ({
+        type: 'actor_import';
+    } & ActorImportResult) | ({
+        type: 'actor_sync';
+    } & ActorSyncResult) | ({
         type: 'rescrape';
     } & RescrapeResult) | null;
 };
@@ -4695,7 +4902,7 @@ export type TaskStatus = 'queued' | 'running' | 'done' | 'failed';
 /**
  * TaskType
  */
-export type TaskType = 'scrape' | 'organize' | 'refresh' | 'cleanup' | 'upscale' | 'r18_import' | 'actor_scrape' | 'rescrape' | 'scan_invalid' | 'delete';
+export type TaskType = 'scrape' | 'organize' | 'refresh' | 'cleanup' | 'upscale' | 'r18_import' | 'actor_scrape' | 'actor_import' | 'actor_sync' | 'rescrape' | 'scan_invalid' | 'delete';
 
 /**
  * TaskWorkerResponse
@@ -8061,6 +8268,10 @@ export type SubmitTaskData = {
     } & R18ImportSubmission) | ({
         type: 'actor_scrape';
     } & ActorScrapeSubmission) | ({
+        type: 'actor_import';
+    } & ActorImportSubmission) | ({
+        type: 'actor_sync';
+    } & ActorSyncSubmission) | ({
         type: 'rescrape';
     } & RescrapeSubmission);
     path?: never;

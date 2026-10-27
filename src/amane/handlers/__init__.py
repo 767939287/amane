@@ -2,6 +2,7 @@ from ._common import LibraryTaskLocks
 from .actor_scrape import *
 from .delete import *
 from .file import *
+from .media_server import *
 from .models import *
 from .protocol import FollowupTask, ProgressCallback, TaskHandler, TaskResult
 from .r18_import import *

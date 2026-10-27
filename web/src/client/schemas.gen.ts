@@ -120,6 +120,54 @@ export const ActorGenderBatchResponseSchema = {
     title: 'ActorGenderBatchResponse'
 } as const;
 
+export const ActorImportResultSchema = {
+    properties: {
+        type: {
+            type: 'string',
+            const: 'actor_import',
+            title: 'Type',
+            default: 'actor_import'
+        },
+        total: {
+            type: 'integer',
+            title: 'Total',
+            default: 0
+        },
+        created: {
+            type: 'integer',
+            title: 'Created',
+            default: 0
+        },
+        skipped: {
+            type: 'integer',
+            title: 'Skipped',
+            default: 0
+        },
+        failed: {
+            type: 'integer',
+            title: 'Failed',
+            default: 0
+        }
+    },
+    type: 'object',
+    title: 'ActorImportResult'
+} as const;
+
+export const ActorImportSubmissionSchema = {
+    properties: {
+        type: {
+            type: 'string',
+            const: 'actor_import',
+            title: 'Type'
+        }
+    },
+    type: 'object',
+    required: [
+        'type'
+    ],
+    title: 'ActorImportSubmission'
+} as const;
+
 export const ActorListResponseSchema = {
     properties: {
         items: {
@@ -519,6 +567,70 @@ export const ActorSortFieldSchema = {
         'cup'
     ],
     title: 'ActorSortField'
+} as const;
+
+export const ActorSyncResultSchema = {
+    properties: {
+        type: {
+            type: 'string',
+            const: 'actor_sync',
+            title: 'Type',
+            default: 'actor_sync'
+        },
+        synced: {
+            type: 'integer',
+            title: 'Synced',
+            default: 0
+        },
+        skipped: {
+            type: 'integer',
+            title: 'Skipped',
+            default: 0
+        },
+        failed: {
+            type: 'integer',
+            title: 'Failed',
+            default: 0
+        },
+        missing: {
+            type: 'integer',
+            title: 'Missing',
+            default: 0
+        },
+        unmatched: {
+            type: 'integer',
+            title: 'Unmatched',
+            default: 0
+        }
+    },
+    type: 'object',
+    title: 'ActorSyncResult'
+} as const;
+
+export const ActorSyncSubmissionSchema = {
+    properties: {
+        actor_ids: {
+            items: {
+                type: 'integer'
+            },
+            type: 'array',
+            maxItems: 1000,
+            minItems: 1,
+            title: 'Actor Ids',
+            description: '要回写的演员 ID'
+        },
+        type: {
+            type: 'string',
+            const: 'actor_sync',
+            title: 'Type'
+        }
+    },
+    type: 'object',
+    required: [
+        'actor_ids',
+        'type'
+    ],
+    title: 'ActorSyncSubmission'
 } as const;
 
 export const ActorUpdateRequestSchema = {
@@ -1195,6 +1307,28 @@ export const BrowserConfigSchema = {
             pattern: '^https?://.+',
             title: 'Solver Url',
             default: 'http://127.0.0.1:8191'
+        },
+        solver_protocol: {
+            $ref: '#/components/schemas/SolverProtocol',
+            default: 'flaresolverr'
+        },
+        bypass_proxy: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Bypass Proxy'
+        },
+        trusted_hosts: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Trusted Hosts'
         }
     },
     type: 'object',
@@ -2966,6 +3100,13 @@ export const HotSettingsSchema = {
                     tags: 'zh_cn',
                     title: 'zh_cn'
                 },
+                plot_mode: 'single',
+                plot_ja_sites: [],
+                plot_zh_sites: [],
+                plot_separator: 'blank_line',
+                tag_merge: 'off',
+                dmm_image_fallback: false,
+                mgstage_image_fallback: false,
                 site_config: {
                     airav: {
                         cookie: {},
@@ -3312,6 +3453,23 @@ export const HotSettingsSchema = {
                 gfriends_repo: 'https://github.com/gfriends/gfriends'
             }
         },
+        media_server: {
+            $ref: '#/components/schemas/MediaServerConfig',
+            default: {
+                enabled: false,
+                server_type: 'emby',
+                base_url: '',
+                api_key: '',
+                timeout: 30,
+                import_missing_actors: true,
+                sync_overview: true,
+                overview_mode: 'append_original',
+                sync_birthday: true,
+                sync_avatar: true,
+                sync_tags: true,
+                sync_provider_ids: true
+            }
+        },
         agent: {
             $ref: '#/components/schemas/AgentConfig',
             default: {
@@ -3335,8 +3493,10 @@ export const HotSettingsSchema = {
                 max_clients: 50,
                 browser: {
                     backend: 'off',
+                    solver_protocol: 'flaresolverr',
                     solver_url: 'http://127.0.0.1:8191',
-                    timeout: 30000
+                    timeout: 30000,
+                    trusted_hosts: []
                 },
                 chunked_threshold: 2097152,
                 chunk_size: 1048576,
@@ -4987,6 +5147,85 @@ export const MediaListResponseSchema = {
     title: 'MediaListResponse'
 } as const;
 
+export const MediaServerConfigSchema = {
+    properties: {
+        enabled: {
+            type: 'boolean',
+            title: 'Enabled',
+            default: false
+        },
+        server_type: {
+            $ref: '#/components/schemas/MediaServerType',
+            default: 'emby'
+        },
+        base_url: {
+            type: 'string',
+            title: 'Base Url',
+            description: '服务地址, 不含 /emby 前缀',
+            default: ''
+        },
+        api_key: {
+            type: 'string',
+            title: 'Api Key',
+            description: '服务端签发的 API 密钥',
+            default: ''
+        },
+        timeout: {
+            type: 'number',
+            maximum: 300,
+            minimum: 5,
+            title: 'Timeout',
+            default: 30
+        },
+        import_missing_actors: {
+            type: 'boolean',
+            title: 'Import Missing Actors',
+            default: true
+        },
+        sync_overview: {
+            type: 'boolean',
+            title: 'Sync Overview',
+            default: true
+        },
+        overview_mode: {
+            $ref: '#/components/schemas/OverviewMode',
+            default: 'append_original'
+        },
+        sync_birthday: {
+            type: 'boolean',
+            title: 'Sync Birthday',
+            default: true
+        },
+        sync_avatar: {
+            type: 'boolean',
+            title: 'Sync Avatar',
+            default: true
+        },
+        sync_tags: {
+            type: 'boolean',
+            title: 'Sync Tags',
+            default: true
+        },
+        sync_provider_ids: {
+            type: 'boolean',
+            title: 'Sync Provider Ids',
+            default: true
+        }
+    },
+    type: 'object',
+    title: 'MediaServerConfig',
+    description: '单台 Emby / Jellyfin; 演员导入与回写共用.'
+} as const;
+
+export const MediaServerTypeSchema = {
+    type: 'string',
+    enum: [
+        'emby',
+        'jellyfin'
+    ],
+    title: 'MediaServerType'
+} as const;
+
 export const MediaSortFieldSchema = {
     type: 'string',
     enum: [
@@ -5627,6 +5866,17 @@ export const MetadataResponseSchema = {
             ],
             title: 'Plot'
         },
+        plot_original: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Plot Original'
+        },
         directors: {
             items: {
                 type: 'string'
@@ -6164,6 +6414,15 @@ export const OrganizeSubmissionSchema = {
     title: 'OrganizeSubmission'
 } as const;
 
+export const OverviewModeSchema = {
+    type: 'string',
+    enum: [
+        'replace',
+        'append_original'
+    ],
+    title: 'OverviewMode'
+} as const;
+
 export const PathTemplatePlaceholderSchema = {
     properties: {
         name: {
@@ -6376,6 +6635,24 @@ export const PlaybackSubtitleItemSchema = {
         'href'
     ],
     title: 'PlaybackSubtitleItem'
+} as const;
+
+export const PlotModeSchema = {
+    type: 'string',
+    enum: [
+        'single',
+        'both'
+    ],
+    title: 'PlotMode'
+} as const;
+
+export const PlotSeparatorSchema = {
+    type: 'string',
+    enum: [
+        'blank_line',
+        'newline'
+    ],
+    title: 'PlotSeparator'
 } as const;
 
 export const PluginConfigSchema = {
@@ -7913,6 +8190,98 @@ export const ScrapingConfigSchema = {
             title: 'Field Language',
             'x-frozen-keys': true
         },
+        plot_mode: {
+            $ref: '#/components/schemas/PlotMode',
+            default: 'single'
+        },
+        plot_ja_sites: {
+            items: {
+                type: 'string',
+                enum: [
+                    'airav',
+                    'avbase',
+                    'avsox',
+                    'dahlia',
+                    'dmm',
+                    'faleno',
+                    'fc2',
+                    'fc2club',
+                    'fc2ppvdb',
+                    'freejavbt',
+                    'getchu',
+                    'giga',
+                    'iqqtv',
+                    'jav321',
+                    'javbus',
+                    'javdb',
+                    'javlibrary',
+                    'kin8',
+                    'mgstage',
+                    'official',
+                    'prestige',
+                    'r18dev',
+                    'theporndb',
+                    'xcity'
+                ]
+            },
+            type: 'array',
+            title: 'Plot Ja Sites',
+            description: '日文简介候选站; 空表示不限站',
+            'x-ordered': true
+        },
+        plot_zh_sites: {
+            items: {
+                type: 'string',
+                enum: [
+                    'airav',
+                    'avbase',
+                    'avsox',
+                    'dahlia',
+                    'dmm',
+                    'faleno',
+                    'fc2',
+                    'fc2club',
+                    'fc2ppvdb',
+                    'freejavbt',
+                    'getchu',
+                    'giga',
+                    'iqqtv',
+                    'jav321',
+                    'javbus',
+                    'javdb',
+                    'javlibrary',
+                    'kin8',
+                    'mgstage',
+                    'official',
+                    'prestige',
+                    'r18dev',
+                    'theporndb',
+                    'xcity'
+                ]
+            },
+            type: 'array',
+            title: 'Plot Zh Sites',
+            description: '中文简介候选站; 空表示不限站',
+            'x-ordered': true
+        },
+        plot_separator: {
+            $ref: '#/components/schemas/PlotSeparator',
+            default: 'blank_line'
+        },
+        tag_merge: {
+            $ref: '#/components/schemas/TagMergeMode',
+            default: 'off'
+        },
+        dmm_image_fallback: {
+            type: 'boolean',
+            title: 'Dmm Image Fallback',
+            default: false
+        },
+        mgstage_image_fallback: {
+            type: 'boolean',
+            title: 'Mgstage Image Fallback',
+            default: false
+        },
         site_config: {
             additionalProperties: {
                 $ref: '#/components/schemas/SiteConfig'
@@ -8269,6 +8638,15 @@ export const SkipReasonSchema = {
     description: '``SKIPPED`` 的原因.\n\n与 ``FailureReason`` 分开: 这一档不是失败, 文案也不进站点明细. 界面按它本地化, 因此每种原因\n都要能独立读懂, 不依赖 ``detail``.'
 } as const;
 
+export const SolverProtocolSchema = {
+    type: 'string',
+    enum: [
+        'flaresolverr',
+        'trawl'
+    ],
+    title: 'SolverProtocol'
+} as const;
+
 export const SortOrderSchema = {
     type: 'string',
     enum: [
@@ -8445,6 +8823,15 @@ export const SrPresetSchema = {
     title: 'SrPreset'
 } as const;
 
+export const TagMergeModeSchema = {
+    type: 'string',
+    enum: [
+        'off',
+        'merge'
+    ],
+    title: 'TagMergeMode'
+} as const;
+
 export const TaskBatchActionSchema = {
     type: 'string',
     enum: [
@@ -8580,13 +8967,21 @@ export const TaskBatchSubmitRequestSchema = {
                         $ref: '#/components/schemas/ActorScrapeSubmission'
                     },
                     {
+                        $ref: '#/components/schemas/ActorImportSubmission'
+                    },
+                    {
+                        $ref: '#/components/schemas/ActorSyncSubmission'
+                    },
+                    {
                         $ref: '#/components/schemas/RescrapeSubmission'
                     }
                 ],
                 discriminator: {
                     propertyName: 'type',
                     mapping: {
+                        actor_import: '#/components/schemas/ActorImportSubmission',
                         actor_scrape: '#/components/schemas/ActorScrapeSubmission',
+                        actor_sync: '#/components/schemas/ActorSyncSubmission',
                         cleanup: '#/components/schemas/CleanupSubmission',
                         delete: '#/components/schemas/DeleteSubmission',
                         organize: '#/components/schemas/OrganizeSubmission',
@@ -9077,13 +9472,21 @@ export const TaskResponseSchema = {
                             $ref: '#/components/schemas/ActorScrapeResult'
                         },
                         {
+                            $ref: '#/components/schemas/ActorImportResult'
+                        },
+                        {
+                            $ref: '#/components/schemas/ActorSyncResult'
+                        },
+                        {
                             $ref: '#/components/schemas/RescrapeResult'
                         }
                     ],
                     discriminator: {
                         propertyName: 'type',
                         mapping: {
+                            actor_import: '#/components/schemas/ActorImportResult',
                             actor_scrape: '#/components/schemas/ActorScrapeResult',
+                            actor_sync: '#/components/schemas/ActorSyncResult',
                             cleanup: '#/components/schemas/CleanupResult',
                             delete: '#/components/schemas/DeleteResult',
                             organize: '#/components/schemas/OrganizeResult',
@@ -9147,6 +9550,8 @@ export const TaskTypeSchema = {
         'upscale',
         'r18_import',
         'actor_scrape',
+        'actor_import',
+        'actor_sync',
         'rescrape',
         'scan_invalid',
         'delete'

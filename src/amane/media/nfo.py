@@ -49,6 +49,9 @@ async def write_nfo(metadata: Metadata, nfo_path: Path) -> bool:
             code.write(f"  <plot>{plot_escaped}</plot>\n")
             code.write(f"  <outline>{plot_escaped}</outline>\n")
 
+        if metadata.plot_original:
+            code.write(f"  <originalplot>{_escape_xml(metadata.plot_original)}</originalplot>\n")
+
         if metadata.release:
             code.write(f"  <premiered>{metadata.release}</premiered>\n")
             code.write(f"  <releasedate>{metadata.release}</releasedate>\n")

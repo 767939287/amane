@@ -12,11 +12,13 @@ import os
 import time
 from abc import ABC, abstractmethod
 from contextlib import AsyncExitStack
+from fnmatch import fnmatchcase
 from typing import TYPE_CHECKING, Any, Literal, NotRequired, Protocol, TypedDict
+from urllib.parse import unquote, urlsplit
 
 import structlog
 
-from ..enums import BrowserBackendName
+from ..enums import BrowserBackendName, SolverProtocol
 from .errors import FailureKind, FailureReason, RequestError, RequestFailure, classify_block
 from .recording import skip_body_recording
 
@@ -38,6 +40,9 @@ _MAX_CONCURRENCY = 2
 # solver 的 HTTP 调用在服务端等待挑战之外留出的余量 (秒), 以及会话建立 / 销毁的调用时限.
 _SOLVER_HTTP_SLACK_S = 10.0
 _SOLVER_SESSION_TIMEOUT_S = 15.0
+# 连续服务级失败 (连接失败 / 429 / 5xx) 达到次数后进入冷却, 期内直接拒绝, 不再发起请求.
+_SOLVER_COOLDOWN_FAILURES = 3
+_SOLVER_COOLDOWN_S = 300.0
 
 
 class BrowserBackend(Protocol):
@@ -90,9 +95,15 @@ class BrowserPool:
         proxy: str | None,
         web_client: WebClient,
         timeout_ms: float,
+        solver_protocol: SolverProtocol = SolverProtocol.FLARESOLVERR,
+        bypass_proxy: str | None = None,
+        trusted_hosts: Sequence[str] = (),
     ) -> None:
         self._default = default_backend
         self._solver_url = solver_url
+        self._solver_protocol = solver_protocol
+        self._bypass_proxy = bypass_proxy
+        self._trusted_hosts = tuple(trusted_hosts)
         self._proxy = proxy
         self._web = web_client
         self._timeout_ms = timeout_ms
@@ -149,6 +160,9 @@ class BrowserPool:
                     web_provider=lambda: self._web,
                     url=self._solver_url,
                     default_timeout=self._timeout_ms,
+                    protocol=self._solver_protocol,
+                    bypass_proxy=self._bypass_proxy,
+                    trusted_hosts=self._trusted_hosts,
                 )
             case _:
                 raise ValueError(f"unsupported browser backend: {name}")
@@ -470,22 +484,44 @@ class CamoufoxBackend(_LocalBackend):
         return browser
 
 
-class SolverBackend:
-    """FlareSolverr 兼容服务: HTML 取自 ``solution.response``, 会话按来源复用且同会话串行.
+class _SolverPage(TypedDict):
+    """solver 归一化后的页面: 正文与最终落地地址 (白名单校验用)."""
 
-    只支持 ``request.get``; 请求头与选择器等待由 solver 自行决定,
-    因此 ``headers`` / ``wait_for`` 不参与转发 (本地后端支持).
+    html: str
+    final_url: str
+
+
+class SolverBackend:
+    """外部 CF 绕过服务: FlareSolverr 取 ``solution.response``, TRAWL 取 ``html``.
+
+    FlareSolverr 按来源复用会话且同会话串行; TRAWL 无会话, cookies 经 ``Cookie`` 头传递.
+    请求头由本后端转发, ``wait_for`` 不参与转发 (等待策略由 solver 决定).
+    连续服务级失败达到阈值后进入冷却, 冷却期内直接拒绝, 不再发起请求.
     """
 
-    def __init__(self, *, web_provider: Callable[[], WebClient], url: str, default_timeout: float) -> None:
+    def __init__(
+        self,
+        *,
+        web_provider: Callable[[], WebClient],
+        url: str,
+        default_timeout: float,
+        protocol: SolverProtocol = SolverProtocol.FLARESOLVERR,
+        bypass_proxy: str | None = None,
+        trusted_hosts: Sequence[str] = (),
+    ) -> None:
         self._web_provider = web_provider
         self._url = url.rstrip("/")
         self._default_timeout = default_timeout
+        self._protocol = protocol
+        self._bypass_proxy = (bypass_proxy or "").strip() or None
+        self._trusted_hosts = tuple(host for host in (raw.strip().lower() for raw in trusted_hosts) if host)
         self._sessions: set[str] = set()
         self._semaphore = asyncio.Semaphore(_MAX_CONCURRENCY)
         self._scope_locks: dict[str, asyncio.Lock] = {}
         self._lock = asyncio.Lock()
         self._closed = False
+        self._consecutive_failures = 0
+        self._cooldown_until = 0.0
 
     async def get_page(
         self,
@@ -499,32 +535,130 @@ class SolverBackend:
     ) -> BrowserPageResult:
         effective = timeout if timeout is not None else self._default_timeout
         async with self._semaphore, self._lock_for(scope):
+            remaining = self._cooldown_until - time.monotonic()
+            if remaining > 0:
+                return None, _solver_cooldown_failure(remaining)
             try:
-                await self._ensure_session(scope)
-                data = await self._request_get(url, scope, effective, cookies)
+                page = await self._fetch(url, scope=scope, timeout_ms=effective, cookies=cookies, headers=headers)
             except RequestError as exc:
-                return None, exc.failure or RequestFailure(kind=FailureKind.UNEXPECTED, message=exc.message)
-            if not _solver_ok(data):
-                message = _solver_message(data)
-                if _is_missing_session(message):
-                    self._sessions.discard(scope)
-                    try:
-                        await self._ensure_session(scope)
-                        data = await self._request_get(url, scope, effective, cookies)
-                    except RequestError as exc:
-                        return None, exc.failure or RequestFailure(kind=FailureKind.UNEXPECTED, message=exc.message)
-                    if not _solver_ok(data):
-                        return None, _solver_failure(_solver_message(data))
-                else:
-                    return None, _solver_failure(message)
+                failure = exc.failure or RequestFailure(kind=FailureKind.UNEXPECTED, message=exc.message)
+                self._note_failure(failure)
+                return None, failure
+            if not self._landing_allowed(page["final_url"]):
+                failure = RequestFailure(
+                    kind=FailureKind.UNEXPECTED,
+                    message=f"bypass landed on untrusted host: {page['final_url']}",
+                )
+                self._note_service_failure()
+                return None, failure
+            self._note_success()
+            return page["html"], None
 
-            solution = data.get("solution")
-            if not isinstance(solution, dict):
-                return None, RequestFailure(kind=FailureKind.UNEXPECTED, message="solver response has no solution")
-            html = solution.get("response")
-            if not isinstance(html, str):
-                return None, RequestFailure(kind=FailureKind.UNEXPECTED, message="solver solution has no response")
-            return html, None
+    async def _fetch(
+        self,
+        url: str,
+        *,
+        scope: str,
+        timeout_ms: float,
+        cookies: Mapping[str, str] | None,
+        headers: Mapping[str, str] | None,
+    ) -> _SolverPage:
+        if self._protocol is SolverProtocol.TRAWL:
+            return await self._fetch_trawl(url, timeout_ms=timeout_ms, cookies=cookies, headers=headers)
+        return await self._fetch_flaresolverr(url, scope=scope, timeout_ms=timeout_ms, cookies=cookies, headers=headers)
+
+    async def _fetch_flaresolverr(
+        self,
+        url: str,
+        *,
+        scope: str,
+        timeout_ms: float,
+        cookies: Mapping[str, str] | None,
+        headers: Mapping[str, str] | None,
+    ) -> _SolverPage:
+        await self._ensure_session(scope)
+        data = await self._request_get(url, scope, timeout_ms, cookies, headers)
+        if not _solver_ok(data):
+            message = _solver_message(data)
+            if _is_missing_session(message):
+                self._sessions.discard(scope)
+                await self._ensure_session(scope)
+                data = await self._request_get(url, scope, timeout_ms, cookies, headers)
+            if not _solver_ok(data):
+                raise RequestError(self._url, _solver_failure(_solver_message(data)))
+        solution = data.get("solution")
+        if not isinstance(solution, dict):
+            raise RequestError(
+                self._url,
+                RequestFailure(kind=FailureKind.UNEXPECTED, message="solver response has no solution"),
+            )
+        html = solution.get("response")
+        if not isinstance(html, str):
+            raise RequestError(
+                self._url,
+                RequestFailure(kind=FailureKind.UNEXPECTED, message="solver solution has no response"),
+            )
+        final_url = solution.get("url")
+        return {"html": html, "final_url": final_url if isinstance(final_url, str) and final_url else url}
+
+    async def _fetch_trawl(
+        self,
+        url: str,
+        *,
+        timeout_ms: float,
+        cookies: Mapping[str, str] | None,
+        headers: Mapping[str, str] | None,
+    ) -> _SolverPage:
+        payload: dict[str, Any] = {"url": url, "maxTimeout": int(timeout_ms)}
+        merged = dict(headers or {})
+        if cookies:
+            merged["Cookie"] = "; ".join(f"{name}={value}" for name, value in cookies.items())
+        if merged:
+            payload["headers"] = merged
+        if self._bypass_proxy:
+            payload["proxy"] = self._bypass_proxy
+        data = await self._post("/scrape", payload, timeout_s=timeout_ms / 1000 + _SOLVER_HTTP_SLACK_S)
+        error = data.get("error")
+        if isinstance(error, str) and error:
+            raise RequestError(self._url, RequestFailure(kind=FailureKind.UNEXPECTED, message=f"trawl error: {error}"))
+        html = data.get("html")
+        if not isinstance(html, str):
+            raise RequestError(
+                self._url,
+                RequestFailure(kind=FailureKind.UNEXPECTED, message="trawl response has no html"),
+            )
+        final_url = data.get("url")
+        return {"html": html, "final_url": final_url if isinstance(final_url, str) and final_url else url}
+
+    def _landing_allowed(self, final_url: str) -> bool:
+        if not self._trusted_hosts:
+            return True
+        try:
+            host = (urlsplit(final_url).hostname or "").lower()
+        except ValueError:
+            return False
+        return any(fnmatchcase(host, pattern) for pattern in self._trusted_hosts)
+
+    def _note_failure(self, failure: RequestFailure) -> None:
+        if _counts_toward_cooldown(failure):
+            self._note_service_failure()
+
+    def _note_service_failure(self) -> None:
+        """服务自身不可用 (连接失败 / 429 / 5xx / 落地域名不符) 才计入冷却."""
+        self._consecutive_failures += 1
+        if self._consecutive_failures < _SOLVER_COOLDOWN_FAILURES:
+            return
+        self._cooldown_until = time.monotonic() + _SOLVER_COOLDOWN_S
+        logger.warning(
+            "cf bypass service cooling down",
+            url=self._url,
+            failures=self._consecutive_failures,
+            cooldown_s=_SOLVER_COOLDOWN_S,
+        )
+
+    def _note_success(self) -> None:
+        self._consecutive_failures = 0
+        self._cooldown_until = 0.0
 
     def _lock_for(self, scope: str) -> asyncio.Lock:
         """会话级互斥: 一个会话只有一个浏览器标签, 并发请求会互相读到对方导航的正文."""
@@ -535,7 +669,12 @@ class SolverBackend:
         return lock
 
     async def _request_get(
-        self, url: str, scope: str, timeout_ms: float, cookies: Mapping[str, str] | None
+        self,
+        url: str,
+        scope: str,
+        timeout_ms: float,
+        cookies: Mapping[str, str] | None,
+        headers: Mapping[str, str] | None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "cmd": "request.get",
@@ -543,9 +682,13 @@ class SolverBackend:
             "session": scope,
             "maxTimeout": int(timeout_ms),
         }
+        if headers:
+            payload["headers"] = dict(headers)
         if cookies:
             payload["cookies"] = [{"name": name, "value": value} for name, value in cookies.items()]
-        return await self._post(payload, timeout_s=timeout_ms / 1000 + _SOLVER_HTTP_SLACK_S)
+        if self._bypass_proxy:
+            payload["proxy"] = _flaresolverr_proxy(self._bypass_proxy)
+        return await self._post("/v1", payload, timeout_s=timeout_ms / 1000 + _SOLVER_HTTP_SLACK_S)
 
     async def _ensure_session(self, scope: str) -> None:
         if scope in self._sessions:
@@ -556,6 +699,7 @@ class SolverBackend:
             if scope in self._sessions:
                 return
             data = await self._post(
+                "/v1",
                 {"cmd": "sessions.create", "session": scope},
                 timeout_s=_SOLVER_SESSION_TIMEOUT_S,
             )
@@ -572,13 +716,27 @@ class SolverBackend:
     def _closed_error(self) -> RequestError:
         return RequestError(self._url, RequestFailure(kind=FailureKind.UNEXPECTED, message="solver backend closed"))
 
-    async def _post(self, payload: dict[str, Any], *, timeout_s: float) -> dict[str, Any]:
+    async def _post(self, path: str, payload: dict[str, Any], *, timeout_s: float) -> dict[str, Any]:
         web = self._web_provider()
         # solver 响应内嵌目标页 HTML, 只记 meta 避免任务记录膨胀.
         with skip_body_recording():
-            resp = await web.request(
-                "POST", f"{self._url}/v1", json=payload, use_proxy=False, timeout=timeout_s, max_attempts=1
-            )
+            try:
+                resp = await web.request(
+                    "POST", f"{self._url}{path}", json=payload, use_proxy=False, timeout=timeout_s, max_attempts=1
+                )
+            except RequestError as exc:
+                failure = exc.failure
+                if failure is None or failure.kind is not FailureKind.HTTP_STATUS:
+                    raise
+                raise RequestError(
+                    self._url,
+                    RequestFailure(
+                        kind=failure.kind,
+                        message=_solver_http_message(failure.status),
+                        status=failure.status,
+                        reason=failure.reason,
+                    ),
+                ) from exc
         try:
             data = resp.json()
         except Exception as exc:
@@ -600,9 +758,48 @@ class SolverBackend:
 
     async def _destroy_session(self, scope: str) -> None:
         try:
-            await self._post({"cmd": "sessions.destroy", "session": scope}, timeout_s=_SOLVER_SESSION_TIMEOUT_S)
+            await self._post("/v1", {"cmd": "sessions.destroy", "session": scope}, timeout_s=_SOLVER_SESSION_TIMEOUT_S)
         except Exception as exc:
             logger.debug("solver session destroy failed (ignored)", session=scope, error=str(exc))
+
+
+def _solver_http_message(status: int | None) -> str:
+    if status == 503:
+        return "CF bypass service browser pool is starting, retry later"
+    if status == 429:
+        return "CF bypass service browser pool is saturated, retry later"
+    return f"CF bypass service returned HTTP {status}"
+
+
+def _solver_cooldown_failure(remaining: float) -> RequestFailure:
+    return RequestFailure(
+        kind=FailureKind.UNEXPECTED,
+        message=f"CF bypass service cooling down, retry in {remaining:.0f}s",
+    )
+
+
+def _counts_toward_cooldown(failure: RequestFailure) -> bool:
+    """只有服务自身不可用才计入冷却: 连接失败与 429/5xx; 挑战未解 / 302 等不在此列."""
+    if failure.kind is FailureKind.CURL:
+        return True
+    if failure.kind is FailureKind.HTTP_STATUS and failure.status is not None:
+        return failure.status == 429 or failure.status >= 500
+    return False
+
+
+def _flaresolverr_proxy(proxy: str) -> dict[str, str]:
+    """FlareSolverr 只接受 ``{"url", "username"?, "password"?}`` 对象, 直接传字符串会被忽略."""
+    parts = urlsplit(proxy if "://" in proxy else f"http://{proxy}")
+    host = parts.hostname or ""
+    if not host:
+        return {"url": proxy}
+    netloc = host if parts.port is None else f"{host}:{parts.port}"
+    obj = {"url": f"{parts.scheme or 'http'}://{netloc}"}
+    if parts.username:
+        obj["username"] = unquote(parts.username)
+    if parts.password:
+        obj["password"] = unquote(parts.password)
+    return obj
 
 
 def _solver_ok(data: dict[str, Any]) -> bool:

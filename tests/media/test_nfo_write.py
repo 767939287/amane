@@ -65,3 +65,21 @@ async def test_write_nfo_plot_is_plain_text(tmp_path: Path):
     root = ET.fromstring(content)
     assert root.findtext("plot") == "结尾 ]]> 之后 & <标签>\n\n第二段"
     assert root.findtext("outline") == root.findtext("plot")
+
+
+@pytest.mark.asyncio(loop_scope="function")
+@pytest.mark.parametrize(
+    ("desc", "original", "expected"),
+    [("有日文段", "日本語 あらすじ", "日本語 あらすじ"), ("无日文段", None, None)],
+    ids=["with_original", "without_original"],
+)
+async def test_write_nfo_original_plot(tmp_path: Path, desc: str, original: str | None, expected: str | None):
+    """``plot_original`` 写进 ``<originalplot>``; 无值时整个元素不出现."""
+    nfo_path = tmp_path / "PLOT-2.nfo"
+
+    row = Metadata(number="PLOT-2", title="T", plot="日本語\n\n中文", plot_original=original)
+    assert await write_nfo(row, nfo_path) is True
+
+    root = ET.fromstring(nfo_path.read_text(encoding="utf-8"))
+    assert root.findtext("plot") == "日本語\n\n中文", desc
+    assert root.findtext("originalplot") == expected, desc

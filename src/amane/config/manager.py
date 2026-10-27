@@ -6,7 +6,7 @@ import tomllib
 from copy import copy
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Self
 from urllib.parse import urlsplit
 
 import tomli_w
@@ -30,8 +30,14 @@ from ..enums import (
     BrowserMode,
     DownloadableResource,
     Language,
+    MediaServerType,
     MetadataField,
+    OverviewMode,
+    PlotMode,
+    PlotSeparator,
     SiteName,
+    SolverProtocol,
+    TagMergeMode,
     WatermarkCorner,
     WatermarkKind,
 )
@@ -378,6 +384,41 @@ class ScrapingConfig(BaseModel):
         json_schema_extra={"x-frozen-keys": True},
     )
 
+    plot_mode: PlotMode = PlotMode.SINGLE
+    """``both`` 把日文简介与中文简介拼成一段 (日文在前); 两段各自的来源见下方两个名单."""
+
+    plot_ja_sites: list[SiteName] = Field(
+        default_factory=list,
+        json_schema_extra=site_list_schema(FILM_METADATA_SITES, ordered=True),
+        description="日文简介候选站; 空表示不限站",
+    )
+    """只在编译后的 plot 字段链内挑选, 顺序仍由链决定."""
+
+    plot_zh_sites: list[SiteName] = Field(
+        default_factory=list,
+        json_schema_extra=site_list_schema(FILM_METADATA_SITES, ordered=True),
+        description="中文简介候选站; 空表示不限站",
+    )
+    """与日文段取自同一份值时不产生中文段, 改由翻译补齐."""
+
+    plot_separator: PlotSeparator = PlotSeparator.BLANK_LINE
+    """中日两段之间的分隔符."""
+
+    tag_merge: TagMergeMode = TagMergeMode.OFF
+    """``merge`` 把字段链上所有已获取来源的标签按链序并集 (主源在前), ``off`` 只取第一个非空来源.
+
+    只影响 ``tags``; 字段黑名单与字段优先级照旧裁剪链, 被剔除的站不参与合并.
+    """
+
+    dmm_image_fallback: bool = False
+    """按番号直构 DMM 官方高清图, 追加到海报/封面候选的尾部.
+
+    厂牌前缀取自静态表与学习表; 无码番号不生成候选.
+    """
+
+    mgstage_image_fallback: bool = False
+    """按番号直构 MGStage 官方封面, 追加到海报/封面候选的尾部. 只覆盖素人系列."""
+
     site_config: dict[str, SiteConfig] = Field(
         default_factory=lambda: {str(site): SiteConfig() for site in SiteName},
         json_schema_extra={"x-frozen-keys": True},
@@ -410,6 +451,16 @@ class ScrapingConfig(BaseModel):
     @classmethod
     def _film_field_blacklist(cls, v: dict[MetadataField, list[str]]) -> dict[MetadataField, list[str]]:
         return _validate_film_field_map(v, prefix="field_blacklist")
+
+    @field_validator("plot_ja_sites")
+    @classmethod
+    def _plot_ja_sites(cls, v: list[SiteName]) -> list[SiteName]:
+        return _validate_plot_sites(v, "plot_ja_sites")
+
+    @field_validator("plot_zh_sites")
+    @classmethod
+    def _plot_zh_sites(cls, v: list[SiteName]) -> list[SiteName]:
+        return _validate_plot_sites(v, "plot_zh_sites")
 
     @field_validator("content_routes")
     @classmethod
@@ -490,6 +541,10 @@ def _validate_film_field_map(v: dict[MetadataField, list[str]], *, prefix: str) 
     return out
 
 
+def _validate_plot_sites(v: list[SiteName], field: str) -> list[SiteName]:
+    return assert_sites_allowed(v, frozenset(FILM_METADATA_SITES), field=field, allow_external=True)
+
+
 def _site_value(site: Any) -> str:
     return str(site)
 
@@ -545,12 +600,43 @@ class BrowserConfig(BaseModel):
     timeout: int = Field(default=30000, ge=5000, le=120000)
     """页面导航默认超时 (毫秒); 单次渲染可覆盖."""
     solver_url: str = Field(default="http://127.0.0.1:8191", pattern=r"^https?://.+")
-    """FlareSolverr 兼容服务地址; 仅 ``solver`` 后端使用. 服务不允许暴露到公网."""
+    """CF 绕过服务地址 (FlareSolverr 或 TRAWL); 仅 ``solver`` 后端使用. 服务不允许暴露到公网."""
+    solver_protocol: SolverProtocol = SolverProtocol.FLARESOLVERR
+    """solver 服务的接口协议. ``trawl`` 只支持 GET, POST 请求仍走直连或本地浏览器."""
+    bypass_proxy: str | None = None
+    """只作用于 solver 请求的上游代理; 空值表示直连, 与 ``network.proxy`` 互不影响."""
+    trusted_hosts: list[str] = Field(default_factory=list)
+    """solver 返回的最终地址必须落在这些 host 内, 支持 ``*.example.com``; 空列表关闭校验."""
 
     @field_validator("backend")
     @classmethod
     def _engine_available(cls, v: BrowserBackendName) -> BrowserBackendName:
         return _require_browser_engine(v)
+
+    @field_validator("bypass_proxy", mode="before")
+    @classmethod
+    def _blank_proxy(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            return v.strip() or None
+        return v
+
+    @field_validator("trusted_hosts", mode="before")
+    @classmethod
+    def _normalize_trusted_hosts(cls, v: Any) -> Any:
+        """去掉协议与路径, 转小写并去重; 通配前缀 ``*.`` 保留."""
+        if not isinstance(v, list):
+            return v
+        hosts: list[str] = []
+        for item in v:
+            if not isinstance(item, str):
+                continue
+            host = item.strip().lower()
+            if "://" in host:
+                host = host.split("://", 1)[1]
+            host = host.split("/", 1)[0].strip()
+            if host and host not in hosts:
+                hosts.append(host)
+        return hosts
 
 
 class NetworkConfig(BaseModel):
@@ -743,6 +829,36 @@ class ActorScrapingConfig(BaseModel):
         return assert_sites_allowed(v, frozenset(ACTOR_IMAGE_SITES), field="image_sites")
 
 
+class MediaServerConfig(BaseModel):
+    """单台 Emby / Jellyfin; 演员导入与回写共用."""
+
+    enabled: bool = False
+    server_type: MediaServerType = MediaServerType.EMBY
+    base_url: str = Field(default="", description="服务地址, 不含 /emby 前缀")
+    api_key: str = Field(default="", description="服务端签发的 API 密钥")
+    timeout: float = Field(default=30.0, ge=5.0, le=300.0)
+
+    import_missing_actors: bool = True
+    """导入时只为本库缺失的人物建档; 关闭后导入任务不写任何行."""
+
+    sync_overview: bool = True
+    overview_mode: OverviewMode = OverviewMode.APPEND_ORIGINAL
+    """append_original 保留服务端原简介作为「经历」追加在后, replace 直接覆盖."""
+
+    sync_birthday: bool = True
+    sync_avatar: bool = True
+    sync_tags: bool = True
+    """写服务端人物 Tags (本地用户标签并入服务端现有标签)."""
+    sync_provider_ids: bool = True
+
+    @model_validator(mode="after")
+    def _require_endpoint(self) -> Self:
+        """启用时地址与密钥必填, 免得任务把空地址当成网络故障."""
+        if self.enabled and (not self.base_url.strip() or not self.api_key.strip()):
+            raise ValueError("启用媒体服务器时 base_url 与 api_key 必填")
+        return self
+
+
 class HotSettings(BaseModel):
     """运行时可更新, 持久化到 TOML. extra=forbid, 未知字段须校验失败."""
 
@@ -792,6 +908,7 @@ class HotSettings(BaseModel):
 
     scraping: ScrapingConfig = ScrapingConfig()
     actor_scraping: ActorScrapingConfig = ActorScrapingConfig()
+    media_server: MediaServerConfig = MediaServerConfig()
     agent: AgentConfig = AgentConfig()
     network: NetworkConfig = NetworkConfig()
     sr: SrConfig = SrConfig()

@@ -20,7 +20,7 @@ from structlog.contextvars import bind_contextvars
 from ..config.manager import LANG_METADATA_FIELD_SET
 from ..crawlers.models import FetchOptions, FilmActor, MediaMetadata, SearchQuery
 from ..crawlers.site_roles import MULTI_LANGUAGE_SOURCE_IDS
-from ..enums import ActorGender, Language, MetadataField, SiteName
+from ..enums import ActorGender, Language, MetadataField, PlotMode, SiteName, TagMergeMode
 from ..observability import current, invoke_source
 from ..utils.text import normalize_long_text
 from .models import AggregatedMetadata, AggregateResult, SourcedScore
@@ -119,6 +119,10 @@ async def aggregate(
     on_progress: ProgressCallback | None = None,
     multi_lang_sites: frozenset[SourceName] = MULTI_LANGUAGE_SOURCE_IDS,
     deferred_sites: frozenset[SourceName] = frozenset(),
+    tag_merge: TagMergeMode = TagMergeMode.OFF,
+    plot_mode: PlotMode = PlotMode.SINGLE,
+    plot_ja_sites: Collection[str] = (),
+    plot_zh_sites: Collection[str] = (),
 ) -> AggregateResult:
     fl = field_language or {}
     snapshots = cache or {}
@@ -126,7 +130,16 @@ async def aggregate(
     graph = build_graph(field_priority, fl, multi_lang_sites=multi_lang_sites)
     current().debug("fetch graph built", graph=str(graph))
     state = await execute_graph(
-        graph, crawlers, query, snapshots, on_progress=on_progress, deferred_sites=deferred_sites
+        graph,
+        crawlers,
+        query,
+        snapshots,
+        on_progress=on_progress,
+        deferred_sites=deferred_sites,
+        tag_merge=tag_merge,
+        plot_mode=plot_mode,
+        plot_ja_sites=plot_ja_sites,
+        plot_zh_sites=plot_zh_sites,
     )
 
     if not state.fetched:
@@ -179,12 +192,19 @@ async def execute_graph(
     db_cache: Mapping[SourceKey, dict] | None = None,
     on_progress: ProgressCallback | None = None,
     deferred_sites: frozenset[SourceName] = frozenset(),
+    tag_merge: TagMergeMode = TagMergeMode.OFF,
+    plot_mode: PlotMode = PlotMode.SINGLE,
+    plot_ja_sites: Collection[str] = (),
+    plot_zh_sites: Collection[str] = (),
 ) -> ExecutionState:
     """两段并发请求; 段间给声明来源注入已定值单源字段与第一段已抓到的图片地址, 全部结束后按字段链拼接多源字段."""
     snapshots = db_cache or {}
     state = ExecutionState(number=query.number)
     deferred = {str(site) for site in deferred_sites}
     field_total = len(SCALAR_FIELDS)
+
+    def resolve() -> None:
+        _resolve_scalars(graph, state, tag_merge, plot_mode, plot_ja_sites, plot_zh_sites)
 
     # 禁用插件 / 未安装来源 / 构造失败不在 crawlers 中: 标成已处理空结果,
     # 不写入 failed / sites_queried, 也不调用 invoke_source (否则 KeyError → unexpected).
@@ -202,7 +222,7 @@ async def execute_graph(
     )
 
     await _fetch_phase(state, first, query, crawlers, snapshots, None)
-    _resolve_scalars(graph, state)
+    resolve()
     await _report_progress(on_progress, state, first, field_total)
 
     if second:
@@ -211,7 +231,7 @@ async def execute_graph(
         # 段间图片地址只装配第一段节点: 第二段贡献尚未取得, 它在链上的位置也无从预知.
         _assemble_url_fields(graph, state.fetched, partial, cache_keys={node.cache_key for node in first})
         await _fetch_phase(state, second, query, crawlers, snapshots, partial)
-        _resolve_scalars(graph, state)
+        resolve()
         await _report_progress(on_progress, state, second, field_total)
 
     _assemble_aggregate_fields(graph, state)
@@ -250,9 +270,24 @@ async def _report_progress(
     await on_progress(_resolved_scalar_count(state.result), field_total, sites)
 
 
-def _resolve_scalars(graph: FetchGraph, state: ExecutionState) -> None:
-    """沿字段链取第一个非空值. 链上仍有未处理节点时中断该字段, 不取后面已返回的站."""
+def _resolve_scalars(
+    graph: FetchGraph,
+    state: ExecutionState,
+    tag_merge: TagMergeMode = TagMergeMode.OFF,
+    plot_mode: PlotMode = PlotMode.SINGLE,
+    plot_ja_sites: Collection[str] = (),
+    plot_zh_sites: Collection[str] = (),
+) -> None:
+    """沿字段链取第一个非空值. 链上仍有未处理节点时中断该字段, 不取后面已返回的站.
+
+    ``tag_merge=merge`` 时 ``tags`` 不走单源取值, 改由 ``_merge_tags`` 汇总已获取的全部来源.
+    ``plot_mode=both`` 时 ``plot`` 同理交给 ``_resolve_plot`` 分两段取值.
+    """
     for field in SCALAR_FIELDS:
+        if field is MetadataField.TAGS and tag_merge is TagMergeMode.MERGE:
+            continue
+        if field is MetadataField.PLOT and plot_mode is PlotMode.BOTH:
+            continue
         if field in state.result.field_sources:
             continue
         for node in graph.field_chains[field]:
@@ -265,6 +300,84 @@ def _resolve_scalars(graph: FetchGraph, state: ExecutionState) -> None:
             if getattr(data, field, None):
                 _fill_scalar(state.result, field, data, cache_key)
                 break
+    if tag_merge is TagMergeMode.MERGE:
+        _merge_tags(graph, state)
+    if plot_mode is PlotMode.BOTH:
+        _resolve_plot(graph, state, plot_ja_sites, plot_zh_sites)
+
+
+def _merge_tags(graph: FetchGraph, state: ExecutionState) -> None:
+    """跨源并集: 按 tags 字段链顺序拼接各来源标签, 主源 (首个非空来源) 在前, 同名只留首次出现.
+
+    合并范围是字段链, 因此字段优先级与字段排除仍然生效; 失败或未返回的站跳过.
+    已获取结果不变时重算幂等, 两段执行各调用一次.
+    """
+    names: list[str] = []
+    seen: set[str] = set()
+    primary: str | None = None
+    for node in graph.field_chains[MetadataField.TAGS]:
+        data = state.fetched.get(node.cache_key)
+        if data is None:
+            continue
+        for name in data.tags:
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            names.append(name)
+        if primary is None and data.tags:
+            primary = node.cache_key
+    state.result.tags = names
+    if primary is None:
+        state.result.field_sources.pop(MetadataField.TAGS, None)
+    else:
+        state.result.field_sources[MetadataField.TAGS] = primary
+
+
+def _plot_segment(
+    chain: Sequence[FetchNode],
+    fetched: Mapping[SourceKey, MediaMetadata | None],
+    sites: Collection[str],
+) -> tuple[SourceKey, str] | None:
+    """沿 plot 字段链取首个非空简介; ``sites`` 非空时只在该集合内的站上取.
+
+    链上仍有未处理节点时中断当前段, 不取后面已返回的站 (与单源取值同一条规则).
+    """
+    allowed = frozenset(sites)
+    for node in chain:
+        if allowed and node.site not in allowed:
+            continue
+        if node.cache_key not in fetched:
+            break
+        data = fetched[node.cache_key]
+        if data is not None and data.plot:
+            return node.cache_key, data.plot
+    return None
+
+
+def _resolve_plot(
+    graph: FetchGraph,
+    state: ExecutionState,
+    ja_sites: Collection[str],
+    zh_sites: Collection[str],
+) -> None:
+    """``plot_mode=both``: 日文段与中文段各自沿 plot 链取首个非空, 拼接留给 handler 在翻译之后.
+
+    名单为空表示不限站; 两段名单都为空时两段同源, 于是 ``plot == plot_original``,
+    handler 据此判定没有中文站原文并翻译. 两段都没取到时退回单源取值.
+    已获取结果不变时重算幂等, 两段执行各调用一次.
+    """
+    chain = graph.field_chains[MetadataField.PLOT]
+    ja = _plot_segment(chain, state.fetched, ja_sites)
+    zh = _plot_segment(chain, state.fetched, zh_sites)
+    primary = ja or zh or _plot_segment(chain, state.fetched, ())
+    if primary is None:
+        state.result.plot = None
+        state.result.plot_original = None
+        state.result.field_sources.pop(MetadataField.PLOT, None)
+        return
+    state.result.plot_original = ja[1] if ja else None
+    state.result.plot = (zh or ja or primary)[1]
+    state.result.field_sources[MetadataField.PLOT] = primary[0]
 
 
 def _resolve_lang(

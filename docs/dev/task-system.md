@@ -15,7 +15,7 @@
 | `SCAN_INVALID` | 遍历库产出清理清单 (文件黑名单 / 小于最小视频大小 / 残留目录 / 空目录), 写入进程内清单存放 | 一切写操作 |
 | `DELETE` | 按清单标识删除文件与目录, 删对应索引, 按需剪枝 | 整库重新扫描、重新生成清单、写 NFO、回收 Resource |
 
-`CLEANUP` / `UPSCALE` 扫描 DB / Resource; `ACTOR_SCRAPE` 刮人物; `R18_IMPORT` 导入 dump. 上述类型均不执行影片落盘.
+`CLEANUP` / `UPSCALE` 扫描 DB / Resource; `ACTOR_SCRAPE` 刮人物; `ACTOR_IMPORT` / `ACTOR_SYNC` 与媒体服务器交换人物资料 (契约见 [media-server.md](media-server.md)); `R18_IMPORT` 导入 dump. 上述类型均不执行影片落盘.
 
 ORGANIZE 的入队来源只有三处: API / Agent 提交, retry 重跑, 库开启自动整理后的链式后继; DELETE 同样只经 API / Agent 提交. Handler 内不许直接 `create_task`, 后继一律经 `TaskResult.followups` 进入完成事务. Watcher 只注册文件并按 `automation` 入队 SCRAPE, 完整的扫描与落盘仍须提交 REFRESH. 手动把 `priority=-1` 用在整理上**不**使它等待刮削完成: 当时尚未刮削完成的文件会被跳过, 须再次运行 ORGANIZE.
 
@@ -55,7 +55,7 @@ SCRAPE **没有**「缓存命中即整体跳过爬取」的快速返回 — 完�
 
 - **建图**: handler 先把 `content_routes[type]`、稀疏 `field_priority` 与稀疏 `field_blacklist` 编成每字段站点链 (见 [config.md](config.md)); `content_routes` 是该类型资格真值, 被全部字段黑名单的站不产生节点. 站点 + 语言唯一确定一个 `FetchNode` (`cache_key`); 站点在任一字段上需要语言时统一用带语言节点.
 - **执行**: 未声明依赖的节点并发请求; 声明 `SourceTrait.NEEDS_PARTIAL` 的来源 (按来源目录的 `traits` 判定) 在第二段并发, 段间注入只读的前序聚合 (`partial_result`, 深拷贝, 内容见 [plugins.md](plugins.md)). 节点不因标量已满足而跳过. `crawlers` 映射是可用集合: 禁用插件 / 未安装第三方 / 构造失败都不在其中, 图节点直接跳过并沿链继续, 不调用 `invoke_source` (因此不会记成 unexpected).
-- **取值**: 标量沿链取第一个非空值 (判定为真值, `0` / 空串 / 空列表都算空), 空值继续回退, 链上仍有未执行节点时中断该字段; 只有非空值写入 `field_sources`. 聚合类字段 (URL / score / extrafanart) 在全部请求结束后按该字段 `field_chains` 拼接, 不按返回先后排列; 某站未返回或该字段为空则跳过. 段间另按同一顺序为 `partial_result` 装配一次图片地址, 只取第一段节点. 标量可以全空: 只要有来源返回结果, 任务仍成功. 落库跳过锁定字段, 见 [data-model.md](data-model.md).
+- **取值**: 标量沿链取第一个非空值 (判定为真值, `0` / 空串 / 空列表都算空), 空值继续回退, 链上仍有未执行节点时中断该字段; 只有非空值写入 `field_sources`. `scraping.tag_merge=merge` 时 `tags` 例外: 不中断链, 按同一链序把各来源标签并集写入 (主源 = 首个非空来源, 仍记它), 两段执行各重算一次. `scraping.plot_mode=both` 时 `plot` 由引擎分两段取值: 日文段与中文段各自沿 plot 链取首个非空 (`plot_ja_sites` / `plot_zh_sites` 非空时只取名单内的站), 中文段写入 `plot`, 日文段写入 `plot_original`, 主源记日文段来源; 两段都没取到则退回单源取值. 拼接与“是否翻译”的判定在 handler: `plot == plot_original` 表示没有中文站原文, 由 LLM 翻译日文段, 否则中文段原样保留, 再按 `plot_separator` 拼成一段. 聚合类字段 (URL / score / extrafanart) 在全部请求结束后按该字段 `field_chains` 拼接, 不按返回先后排列; 某站未返回或该字段为空则跳过. 段间另按同一顺序为 `partial_result` 装配一次图片地址, 只取第一段节点. 标量可以全空: 只要有来源返回结果, 任务仍成功. 落库跳过锁定字段, 见 [data-model.md](data-model.md).
 
 ## TaskHandler 契约
 
@@ -121,6 +121,7 @@ handler 之间复用的阶段逻辑, 不是一条可跳步的总管线:
 `ScrapeHandler` 在聚合后、`upsert_metadata` 前调用 `materialize_images` (`src/amane/media/pipeline.py`) — 二进制写入 Resource 目录的主路径, 与是否整理无关:
 
 - **`scraping.download_resources`** 控制本步下载哪些类型 (thumb / poster / extrafanart / trailer).
+- **官方图源直构兜底**: 聚合后、物化前按 `scraping.dmm_image_fallback` / `mgstage_image_fallback` 追加候选 (见 [crawlers.md](crawlers.md)), 因此同样参与下面的 URL 重排契约.
 - **URL 重排契约**: 被下载类型的 URL 列表按本次下载成功 (含缓存命中) 稳定分区 — 成功者保序前置, 失败者保序沉底. 死 URL 不再占据首位, 但保留在尾部, 来源恢复后下次物化可重新尝试. 未选中下载的类型无成败信息, 保持聚合优先级原序; extrafanart 为站点分组 dict, 不重排. `raw` 快照保持站点原始数据.
 - 裁剪海报 → 按 `scraping.poster_ratio` 从 thumb 右侧裁切; 超分就地覆盖. 失败不阻断刮削.
 

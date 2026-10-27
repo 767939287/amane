@@ -16,7 +16,7 @@ from amane.aggregate import (
 from amane.aggregate.engine import _cache_key
 from amane.aggregate.models import AggregatedMetadata
 from amane.crawlers.models import FetchOptions, FilmActor, MediaMetadata, SearchQuery
-from amane.enums import ActorGender, Language, MetadataField, SiteName
+from amane.enums import ActorGender, Language, MetadataField, PlotMode, SiteName, TagMergeMode
 
 # --- 辅助工具 ---
 
@@ -719,6 +719,201 @@ class TestAggregate:
 
         assert len(crawler.fetch_calls) == 0
         assert result.metadata.plot == "旧\n快照"
+
+
+# ============================================================
+# tags 跨源合并
+# ============================================================
+
+TAGS = MetadataField.TAGS
+
+
+class TestTagMerge:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("desc", "tags_by_site", "prefer", "mode", "expected_tags", "expected_source"),
+        [
+            ("off 只取首个非空来源", {K1: ["A"], K2: ["B"]}, {}, TagMergeMode.OFF, ["A"], K1),
+            ("merge 并集, 主源在前", {K1: ["A"], K2: ["B", "A"]}, {}, TagMergeMode.MERGE, ["A", "B"], K1),
+            ("merge 跳过空串", {K1: ["", "A"], K2: ["A"]}, {}, TagMergeMode.MERGE, ["A"], K1),
+            ("merge 主源无标签时由后续源提供", {K1: [], K2: ["B"]}, {}, TagMergeMode.MERGE, ["B"], K2),
+            ("merge 全部无标签", {K1: [], K2: []}, {}, TagMergeMode.MERGE, [], None),
+            ("merge 跳过失败站", {K1: None, K2: ["B"]}, {}, TagMergeMode.MERGE, ["B"], K2),
+            ("merge 按 tags 字段链排序", {K1: ["A"], K2: ["B"]}, {TAGS: [DMM, DB]}, TagMergeMode.MERGE, ["B", "A"], K2),
+        ],
+        ids=[
+            "off_first_source",
+            "merge_union",
+            "merge_blank_name",
+            "merge_secondary",
+            "merge_empty",
+            "merge_failed_site",
+            "merge_chain_order",
+        ],
+    )
+    async def test_modes(
+        self,
+        desc: str,
+        tags_by_site: dict[str, list[str] | None],
+        prefer: dict[MetadataField, list[SiteName]],
+        mode: TagMergeMode,
+        expected_tags: list[str],
+        expected_source: str | None,
+    ) -> None:
+        crawlers: dict[str, MockCrawler | FailingCrawler] = {}
+        for key, tags in tags_by_site.items():
+            crawlers[key] = FailingCrawler() if tags is None else MockCrawler(MediaMetadata(number="X", tags=tags))
+
+        result = await aggregate(SearchQuery("X"), crawlers, defaultdict(lambda: [DB, DMM], prefer), tag_merge=mode)
+
+        assert result.metadata.tags == expected_tags, desc
+        assert result.field_sources.get(TAGS) == expected_source, desc
+
+    @pytest.mark.asyncio
+    async def test_second_phase_source_merged(self):
+        """声明依赖的来源在第二段才返回, 标签仍并入同一份并集."""
+        c1 = MockCrawler(MediaMetadata(number="X", tags=["A"]))
+        c2 = MockCrawler(MediaMetadata(number="X", tags=["B"]))
+
+        result = await aggregate(
+            SearchQuery("X"),
+            {K1: c1, K2: c2},
+            defaultdict(lambda: [DB, DMM]),
+            deferred_sites=frozenset({K2}),
+            tag_merge=TagMergeMode.MERGE,
+        )
+
+        assert result.metadata.tags == ["A", "B"]
+        assert result.field_sources[TAGS] == K1
+
+    @pytest.mark.asyncio
+    async def test_merge_keeps_other_fields_single_source(self):
+        """合并只作用于 tags, 其它标量仍是首个非空来源."""
+        c1 = MockCrawler(MediaMetadata(number="X", tags=["A"]))
+        c2 = MockCrawler(MediaMetadata(number="X", title="FromSecond", tags=["B"]))
+
+        result = await aggregate(
+            SearchQuery("X"), {K1: c1, K2: c2}, defaultdict(lambda: [DB, DMM]), tag_merge=TagMergeMode.MERGE
+        )
+
+        assert result.metadata.title == "FromSecond"
+        assert result.field_sources[MetadataField.TITLE] == K2
+
+
+# ============================================================
+# plot 中日分段
+# ============================================================
+
+
+class TestPlotMode:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        (
+            "desc",
+            "plots_by_site",
+            "ja_sites",
+            "zh_sites",
+            "mode",
+            "expected_plot",
+            "expected_original",
+            "expected_source",
+        ),
+        [
+            ("single 取首个非空", {K1: "DB", K2: "DMM"}, [], [], PlotMode.SINGLE, "DB", None, K1),
+            ("both 空名单两段同源", {K1: "DB", K2: "DMM"}, [], [], PlotMode.BOTH, "DB", "DB", K1),
+            (
+                "both 日文段与中文段分站",
+                {K1: "中文", K2: "日本語"},
+                [DMM],
+                [DB],
+                PlotMode.BOTH,
+                "中文",
+                "日本語",
+                K2,
+            ),
+            ("both 中文段缺失只留日文段", {K2: "日本語"}, [DMM], [DB], PlotMode.BOTH, "日本語", "日本語", K2),
+            ("both 日文段缺失只留中文段", {K1: "中文"}, [DMM], [DB], PlotMode.BOTH, "中文", None, K1),
+            ("both 名单外的站不参与", {K2: "日本語", K3: "别站"}, [DMM], [DB], PlotMode.BOTH, "日本語", "日本語", K2),
+            ("both 两段都取不到回退单源", {K1: "DB"}, [DMM], [BUS], PlotMode.BOTH, "DB", None, K1),
+            ("both 全部无简介", {K1: None, K2: None}, [DMM], [DB], PlotMode.BOTH, None, None, None),
+        ],
+        ids=[
+            "single_first_source",
+            "both_same_segment",
+            "both_split",
+            "both_no_zh",
+            "both_no_ja",
+            "both_ignores_unlisted",
+            "both_fallback_single",
+            "both_empty",
+        ],
+    )
+    async def test_modes(
+        self,
+        desc: str,
+        plots_by_site: dict[str, str | None],
+        ja_sites: list[SiteName],
+        zh_sites: list[SiteName],
+        mode: PlotMode,
+        expected_plot: str | None,
+        expected_original: str | None,
+        expected_source: str | None,
+    ) -> None:
+        crawlers = {
+            key: FailingCrawler() if plot is None else MockCrawler(MediaMetadata(number="X", plot=plot))
+            for key, plot in plots_by_site.items()
+        }
+
+        result = await aggregate(
+            SearchQuery("X"),
+            crawlers,
+            defaultdict(lambda: [DB, DMM, BUS]),
+            plot_mode=mode,
+            plot_ja_sites=ja_sites,
+            plot_zh_sites=zh_sites,
+        )
+
+        assert result.metadata.plot == expected_plot, desc
+        assert result.metadata.plot_original == expected_original, desc
+        assert result.field_sources.get(PLOT) == expected_source, desc
+
+    @pytest.mark.asyncio
+    async def test_second_phase_segment_recomputed(self):
+        """日文段来自第二段来源时, 段间结果不被当成最终值."""
+        c1 = MockCrawler(MediaMetadata(number="X", plot="中文"))
+        c2 = MockCrawler(MediaMetadata(number="X", plot="日本語"))
+
+        result = await aggregate(
+            SearchQuery("X"),
+            {K1: c1, K2: c2},
+            defaultdict(lambda: [DB, DMM]),
+            deferred_sites=frozenset({K2}),
+            plot_mode=PlotMode.BOTH,
+            plot_ja_sites=[DMM],
+            plot_zh_sites=[DB],
+        )
+
+        assert result.metadata.plot == "中文"
+        assert result.metadata.plot_original == "日本語"
+        assert result.field_sources[PLOT] == K2
+
+    @pytest.mark.asyncio
+    async def test_both_keeps_other_fields_single_source(self):
+        """分段只作用于 plot, 其它标量仍是首个非空来源."""
+        c1 = MockCrawler(MediaMetadata(number="X", title="FromJavDB", plot="中文"))
+        c2 = MockCrawler(MediaMetadata(number="X", title="FromDMM", plot="日本語"))
+
+        result = await aggregate(
+            SearchQuery("X"),
+            {K1: c1, K2: c2},
+            defaultdict(lambda: [DB, DMM]),
+            plot_mode=PlotMode.BOTH,
+            plot_ja_sites=[DMM],
+            plot_zh_sites=[DB],
+        )
+
+        assert result.metadata.title == "FromJavDB"
+        assert result.field_sources[MetadataField.TITLE] == K1
 
 
 # ============================================================

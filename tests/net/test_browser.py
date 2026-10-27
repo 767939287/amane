@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from amane.enums import BrowserBackendName
+from amane.enums import BrowserBackendName, SolverProtocol
 from amane.net.browser import BrowserPageResult, BrowserPool, SolverBackend, _Cookie, _is_timeout, _LocalBackend
 from amane.net.errors import FailureKind, FailureReason, RequestError, RequestFailure, classify_request_error
 
@@ -669,3 +669,164 @@ async def test_solver_releases_scope_lock_on_session_failure():
     assert failed[1].message == "boom"
     assert recovered == ("<html>ok</html>", None)
     assert [call["cmd"] for call in web.calls] == ["sessions.create", "sessions.create", "request.get"]
+
+
+# solver 协议: TRAWL 请求体 / 响应, 落地域名白名单, 服务不可用冷却.
+
+
+def _make_trawl(responses: list[object], **kwargs: Any) -> tuple[SolverBackend, _FakeWeb]:
+    web = _FakeWeb(responses)
+    solver = SolverBackend(
+        web_provider=lambda: web,  # type: ignore[arg-type]
+        url="http://solver.test:8191/",
+        default_timeout=1000,
+        protocol=SolverProtocol.TRAWL,
+        **kwargs,
+    )
+    return solver, web
+
+
+@pytest.mark.asyncio
+async def test_trawl_posts_scrape_payload():
+    solver, web = _make_trawl(
+        [{"url": "https://a.example/final", "statusCode": 200, "html": "<html>t</html>"}],
+        bypass_proxy="http://user:pw@bypass.local:8080",
+    )
+
+    html, failure = await solver.get_page("https://a.example/", scope="site-a", cookies={"c": "1"}, headers={"A": "b"})
+
+    assert (html, failure) == ("<html>t</html>", None)
+    assert len(web.calls) == 1
+    method, url, kwargs = web.calls[0]
+    assert (method, url) == ("POST", "http://solver.test:8191/scrape")
+    assert kwargs["json"] == {
+        "url": "https://a.example/",
+        "maxTimeout": 1000,
+        "headers": {"A": "b", "Cookie": "c=1"},
+        "proxy": "http://user:pw@bypass.local:8080",
+    }
+    assert kwargs["use_proxy"] is False
+
+
+@pytest.mark.asyncio
+async def test_trawl_error_field_maps_failure():
+    solver, _ = _make_trawl([{"error": "browser pool not ready"}])
+
+    html, failure = await solver.get_page("https://a.example/", scope="site-a")
+
+    assert html is None
+    assert failure is not None
+    assert failure.message == "trawl error: browser pool not ready"
+
+
+@pytest.mark.asyncio
+async def test_trawl_http_503_maps_readable_message():
+    http_failure = RequestFailure(kind=FailureKind.HTTP_STATUS, status=503, message="HTTP 503")
+    solver, _ = _make_trawl([RequestError("http://solver.test:8191/scrape", http_failure)])
+
+    html, failure = await solver.get_page("https://a.example/", scope="site-a")
+
+    assert html is None
+    assert failure is not None
+    assert (failure.kind, failure.status) == (FailureKind.HTTP_STATUS, 503)
+    assert failure.message == "CF bypass service browser pool is starting, retry later"
+
+
+_UNTRUSTED_SOLUTION = {
+    "status": "ok",
+    "solution": {"response": "<html>ok</html>", "status": 200, "url": "https://evil.example/x"},
+}
+
+
+@pytest.mark.asyncio
+async def test_flaresolverr_forwards_proxy_object():
+    web = _FakeWeb([{"status": "ok"}, _SOLVER_OK])
+    solver = SolverBackend(
+        web_provider=lambda: web,  # type: ignore[arg-type]
+        url="http://solver.test:8191",
+        default_timeout=1000,
+        bypass_proxy="http://user:pw@proxy.local:8080",
+    )
+
+    assert await solver.get_page("https://a.example/", scope="site-a") == ("<html>ok</html>", None)
+    assert web.calls[1][2]["json"]["proxy"] == {
+        "url": "http://proxy.local:8080",
+        "username": "user",
+        "password": "pw",
+    }
+
+
+@pytest.mark.asyncio
+async def test_solver_rejects_untrusted_landing():
+    web = _FakeWeb([{"status": "ok"}, _UNTRUSTED_SOLUTION])
+    solver = SolverBackend(
+        web_provider=lambda: web,  # type: ignore[arg-type]
+        url="http://solver.test:8191",
+        default_timeout=1000,
+        trusted_hosts=["a.example"],
+    )
+
+    html, failure = await solver.get_page("https://a.example/", scope="site-a")
+
+    assert html is None
+    assert failure is not None
+    assert failure.message == "bypass landed on untrusted host: https://evil.example/x"
+
+
+@pytest.mark.asyncio
+async def test_solver_accepts_trusted_wildcard_landing():
+    solution = {
+        "status": "ok",
+        "solution": {"response": "<html>ok</html>", "status": 200, "url": "https://a.example/x"},
+    }
+    web = _FakeWeb([{"status": "ok"}, solution])
+    solver = SolverBackend(
+        web_provider=lambda: web,  # type: ignore[arg-type]
+        url="http://solver.test:8191",
+        default_timeout=1000,
+        trusted_hosts=["*.example"],
+    )
+
+    assert await solver.get_page("https://a.example/", scope="site-a") == ("<html>ok</html>", None)
+
+
+@pytest.mark.asyncio
+async def test_solver_cooldown_short_circuits_after_service_failures():
+    http_failure = RequestFailure(kind=FailureKind.HTTP_STATUS, status=503, message="HTTP 503")
+    solver, web = _make_trawl([RequestError("u", http_failure) for _ in range(3)])
+
+    for _ in range(3):
+        html, failure = await solver.get_page("https://a.example/", scope="site-a")
+        assert html is None
+        assert failure is not None
+
+    html, failure = await solver.get_page("https://a.example/", scope="site-a")
+
+    assert html is None
+    assert failure is not None
+    assert "cooling down" in failure.message
+    assert len(web.calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_solver_cooldown_resets_after_success():
+    http_failure = RequestFailure(kind=FailureKind.HTTP_STATUS, status=500, message="HTTP 500")
+    solver, web = _make_trawl(
+        [
+            RequestError("u", http_failure),
+            RequestError("u", http_failure),
+            {"url": "https://a.example/", "html": "<html>ok</html>"},
+            RequestError("u", http_failure),
+        ]
+    )
+
+    await solver.get_page("https://a.example/", scope="site-a")
+    await solver.get_page("https://a.example/", scope="site-a")
+    assert await solver.get_page("https://a.example/", scope="site-a") == ("<html>ok</html>", None)
+
+    html, failure = await solver.get_page("https://a.example/", scope="site-a")
+
+    assert html is None
+    assert failure is not None
+    assert "cooling down" not in failure.message
+    assert len(web.calls) == 4

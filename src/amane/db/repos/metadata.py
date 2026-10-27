@@ -50,10 +50,14 @@ def _normalize_text_fields(fields: MetadataFields) -> MetadataFields:
 
     覆盖面是全部写库路径: 首刮 / 补刮 / merge / REST PATCH / Agent 工具都经这两个写方法.
     """
+    normalized: MetadataFields = {**fields}
     plot = fields.get("plot")
-    if not isinstance(plot, str):
-        return fields
-    return {**fields, "plot": normalize_long_text(plot)}
+    if isinstance(plot, str):
+        normalized["plot"] = normalize_long_text(plot)
+    original = fields.get("plot_original")
+    if isinstance(original, str):
+        normalized["plot_original"] = normalize_long_text(original)
+    return normalized
 
 
 # 锁字段 (MetadataField) ↔ Metadata 列名; 仅 extrafanart / score 两名不同.
@@ -325,6 +329,8 @@ class MetadataRepoMixin(RepositoryMixinBase):
                 metadata.series = updates["series"]
             if "plot" in updates:
                 metadata.plot = updates["plot"]
+            if "plot_original" in updates:
+                metadata.plot_original = updates["plot_original"]
             if "directors" in updates:
                 metadata.directors = updates["directors"]
             if "poster_urls" in updates:

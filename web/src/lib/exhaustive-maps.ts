@@ -90,6 +90,8 @@ export const TASK_TYPES = exhaustiveTuple<TaskType>()(
   "upscale",
   "r18_import",
   "actor_scrape",
+  "actor_import",
+  "actor_sync",
   "rescrape",
   "scan_invalid",
   "delete",
@@ -186,6 +188,8 @@ export const MANUAL_TASK_TYPES = exhaustiveTuple<ManualTaskType>()(
   "upscale",
   "r18_import",
   "actor_scrape",
+  "actor_import",
+  "actor_sync",
   "rescrape",
 );
 

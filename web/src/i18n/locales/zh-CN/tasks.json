@@ -59,6 +59,8 @@
     "refresh": "扫描",
     "r18_import": "R18 导入",
     "actor_scrape": "演员刮削",
+    "actor_import": "服务器导入",
+    "actor_sync": "回写服务器",
     "rescrape": "重新刮削",
     "scan_invalid": "扫描无效文件",
     "delete": "删除"
@@ -136,6 +138,8 @@
       "refresh": "扫描",
       "r18_import": "R18 导入",
       "actor_scrape": "演员刮削",
+      "actor_import": "导入服务器人物",
+      "actor_sync": "回写服务器",
       "rescrape": "重新刮削",
       "scan_invalid": "扫描无效文件",
       "delete": "删除"
@@ -303,6 +307,13 @@
             "trans": "译文缓存"
           }
         }
+      }
+    },
+    "actor_import": {},
+    "actor_sync": {
+      "actor_ids": {
+        "label": "演员 ID",
+        "description": "要回写到服务器的演员"
       }
     },
     "number": "番号",

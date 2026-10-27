@@ -7,7 +7,11 @@ from pydantic import BaseModel, Field, TypeAdapter, field_validator, model_valid
 
 from ...db import MediaFile, Repository, TaskStatus, TaskType
 from ...handlers import (
+    ActorImportPayload,
+    ActorImportResult,
     ActorScrapeResult,
+    ActorSyncPayload,
+    ActorSyncResult,
     CacheKind,
     CleanupPayload,
     CleanupResult,
@@ -50,6 +54,8 @@ TaskResultPayload = Annotated[
     | UpscaleResult
     | R18ImportResult
     | ActorScrapeResult
+    | ActorImportResult
+    | ActorSyncResult
     | RescrapeResult,
     Field(discriminator="type"),
 ]
@@ -255,6 +261,14 @@ class ActorScrapeSubmission(BaseModel):
     )
 
 
+class ActorImportSubmission(ActorImportPayload):
+    type: Literal["actor_import"]
+
+
+class ActorSyncSubmission(ActorSyncPayload):
+    type: Literal["actor_sync"]
+
+
 TaskSubmission = Annotated[
     RefreshSubmission
     | OrganizeSubmission
@@ -265,6 +279,8 @@ TaskSubmission = Annotated[
     | UpscaleSubmission
     | R18ImportSubmission
     | ActorScrapeSubmission
+    | ActorImportSubmission
+    | ActorSyncSubmission
     | RescrapeSubmission,
     Field(discriminator="type"),
 ]

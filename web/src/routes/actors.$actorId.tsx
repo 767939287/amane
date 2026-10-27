@@ -17,6 +17,7 @@ import { useDisclosure } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import {
   IconCheck,
+  IconCloudUpload,
   IconCrop,
   IconEraser,
   IconExternalLink,
@@ -154,6 +155,22 @@ function ActorDetailPage() {
       if (res.submitted > 0) {
         notifications.show({ message: t("browse.scrapeQueued"), color: "blue" });
         invalidate();
+        return;
+      }
+      notifications.show({ message: t("common:toast.operationFailed"), color: "red" });
+    },
+    onError: (err) =>
+      notifications.show({
+        message: extractErrorMessage(err, t("common:toast.operationFailed")),
+        color: "red",
+      }),
+  });
+
+  const syncMutation = useMutation({
+    ...batchSubmitTasksMutation(),
+    onSuccess: (res) => {
+      if (res.submitted > 0) {
+        notifications.show({ message: t("actors.syncQueued"), color: "blue" });
         return;
       }
       notifications.show({ message: t("common:toast.operationFailed"), color: "red" });
@@ -374,6 +391,12 @@ function ActorDetailPage() {
               body: { submissions: [{ type: "actor_scrape", actor_id: id, use_cache: useCache }] },
             })
           }
+          syncPending={syncMutation.isPending}
+          onSync={() =>
+            syncMutation.mutate({
+              body: { submissions: [{ type: "actor_sync", actor_ids: [id] }] },
+            })
+          }
           onEdit={() => setEditOpen(true)}
           onCrop={() => setCropOpen(true)}
           onClear={() => void handleClear()}
@@ -443,6 +466,7 @@ function ActorDetailPage() {
 function ActorHero({
   actor,
   scrapePending,
+  syncPending,
   clearPending,
   lockProps,
   lockedFields,
@@ -451,6 +475,7 @@ function ActorHero({
   onToggleLock,
   onApplyLocks,
   onScrape,
+  onSync,
   onEdit,
   onCrop,
   onClear,
@@ -459,6 +484,7 @@ function ActorHero({
 }: {
   actor: ActorResponse;
   scrapePending: boolean;
+  syncPending: boolean;
   clearPending: boolean;
   lockProps: (field: ActorField) => LockProps<ActorField>;
   lockedFields: ReadonlySet<ActorField>;
@@ -467,6 +493,7 @@ function ActorHero({
   onToggleLock: (field: ActorField) => void;
   onApplyLocks: (fields: readonly ActorField[]) => void;
   onScrape: (useCache: CacheKind[]) => void;
+  onSync: () => void;
   onEdit: () => void;
   onCrop: () => void;
   onClear: () => void;
@@ -716,11 +743,21 @@ function ActorHero({
               </Menu.Item>
             </Menu.Dropdown>
           </Menu>
+          <Button
+            size="xs"
+            variant="light"
+            leftSection={<IconCloudUpload size={14} />}
+            loading={syncPending}
+            onClick={onSync}
+          >
+            {t("actors.syncToServer")}
+          </Button>
           <Link
             to="/meta"
             search={metaSearchForFacet("actor", actor.id)}
             style={{ textDecoration: "none" }}
           >
+            {" "}
             <Button
               size="xs"
               variant="light"

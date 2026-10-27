@@ -258,6 +258,21 @@ class FacetsRepoMixin(RepositoryMixinBase):
         async with self._session() as session:
             return await session.get(Actor, actor_id)
 
+    async def create_actor(self, actor: Actor) -> Actor | None:
+        """按给定字段新建人物行; 展示名已存在 (或并发插入撞唯一约束) 返回 None."""
+        async with self._session() as session:
+            existing = (await session.exec(select(Actor).where(col(Actor.name) == actor.name))).first()
+            if existing is not None:
+                return None
+            session.add(actor)
+            try:
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+                return None
+            await session.refresh(actor)
+            return actor
+
     async def get_actor_names(self, actor_ids: Sequence[int]) -> dict[int, str]:
         """不存在的 id 不出现在结果中."""
         ids = list(dict.fromkeys(int(i) for i in actor_ids if i))

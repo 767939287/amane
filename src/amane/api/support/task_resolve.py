@@ -4,7 +4,9 @@ from typing import TYPE_CHECKING, assert_never
 
 from ...db.models import TaskType
 from ...handlers import (
+    ActorImportPayload,
     ActorScrapePayload,
+    ActorSyncPayload,
     CleanupPayload,
     DeletePayload,
     OrganizePayload,
@@ -16,7 +18,9 @@ from ...handlers import (
     UpscalePayload,
 )
 from ..models import (
+    ActorImportSubmission,
     ActorScrapeSubmission,
+    ActorSyncSubmission,
     CleanupSubmission,
     DeleteSubmission,
     OrganizeSubmission,
@@ -42,6 +46,8 @@ ResolvedPayload = (
     | UpscalePayload
     | R18ImportPayload
     | ActorScrapePayload
+    | ActorImportPayload
+    | ActorSyncPayload
     | RescrapePayload
 )
 
@@ -74,6 +80,10 @@ async def resolve_submission(req: TaskSubmission, repo: Repository) -> tuple[Tas
             return TaskType.R18_IMPORT, R18ImportPayload(force=req.force)
         case ActorScrapeSubmission():
             return TaskType.ACTOR_SCRAPE, ActorScrapePayload(actor_id=req.actor_id, use_cache=req.use_cache)
+        case ActorImportSubmission():
+            return TaskType.ACTOR_IMPORT, ActorImportPayload()
+        case ActorSyncSubmission():
+            return TaskType.ACTOR_SYNC, ActorSyncPayload(actor_ids=req.actor_ids)
         case RescrapeSubmission():
             return TaskType.RESCRAPE, RescrapePayload(
                 limit=req.limit, min_age_days=req.min_age_days, targets=req.targets

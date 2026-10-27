@@ -10,9 +10,10 @@ from pydantic import ValidationError
 
 from amane.aggregate import AggregatedMetadata
 from amane.config import HotSettings, ScrapingConfig
+from amane.crawlers.fallback import DmmPrefixStore
 from amane.crawlers.models import MediaMetadata
 from amane.db.models import MediaFileStatus, Task, TaskStatus, TaskType
-from amane.enums import MetadataField, SiteName
+from amane.enums import MetadataField, PlotMode, PlotSeparator, SiteName
 from amane.handlers import RefreshHandler, RefreshPayload, ScanMode, ScrapeHandler, ScrapePayload
 from amane.library import CleanupInventory, InventorySource, InventoryStore, LibraryFileKind, LibraryHit, scan_inventory
 from amane.observability import Recorder
@@ -426,11 +427,12 @@ class RecordingFactory:
         return {n: self._available[n] for n in names if n in self._available}
 
 
-def _config_with(routes, field_priority=None, field_blacklist=None):
+def _config_with(routes, field_priority=None, field_blacklist=None, **scraping_kwargs):
     scraping = ScrapingConfig(
         content_routes=routes,
         field_priority=field_priority or {},
         field_blacklist=field_blacklist or {},
+        **scraping_kwargs,
     )
     return HotSettings(scraping=scraping)
 
@@ -583,6 +585,153 @@ class TestScrapeTranslation:
         metadata = await repo.get_metadata_by_number("MIDV-123")
         assert metadata is not None
         assert metadata.title == "Mock Title"
+
+
+# --- 中日简介 ---
+
+
+class PlotCrawler:
+    def __init__(self, plot: str):
+        self._plot = plot
+
+    async def fetch(self, query, options=None) -> MediaMetadata | None:
+        return MediaMetadata(number="MIDV-123", plot=self._plot)
+
+
+class RecordingTranslator:
+    def __init__(self):
+        self.fields: list[str] = []
+
+    async def translate(self, text, target, field, *, use_cache=True):
+        self.fields.append(str(field))
+        return f"[{target}]{text}"
+
+
+class TestPlotMix:
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_both_mode_prefers_chinese_source(self, repo: Repository, resource_store):
+        """中文段取中文站原文, 不再翻译; 日文段落库供 NFO."""
+        translator = RecordingTranslator()
+        config = _config_with(
+            {ContentType.CENSORED: [SiteName.JAVDB, SiteName.DMM]},
+            plot_mode=PlotMode.BOTH,
+            plot_ja_sites=[SiteName.DMM],
+            plot_zh_sites=[SiteName.JAVDB],
+        )
+        factory = RecordingFactory({"javdb": PlotCrawler("中文简介"), "dmm": PlotCrawler("日本語のあらすじ")})
+        h = ScrapeHandler(
+            repo=repo,
+            factory=factory,
+            resource_store=resource_store,
+            pipeline_config=config,
+            translator=translator,
+        )
+
+        media = await repo.create_media_file(library_id=1, path="/media/MIDV-123.mp4")
+        result = await h.handle(
+            ScrapePayload(media_file_id=media.id, number="MIDV-123", content_type=ContentType.CENSORED)
+        )
+        assert result.success is True
+
+        metadata = await repo.get_metadata_by_number("MIDV-123")
+        assert metadata is not None
+        assert metadata.plot == "日本語のあらすじ\n\n中文简介"
+        assert metadata.plot_original == "日本語のあらすじ"
+        assert str(MetadataField.PLOT) not in translator.fields
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_both_mode_translates_when_no_chinese_source(self, repo: Repository, resource_store):
+        """没有中文站原文时翻译日文段, 再拼到日文段之后."""
+        translator = RecordingTranslator()
+        config = _config_with(
+            {ContentType.CENSORED: [SiteName.DMM]},
+            plot_mode=PlotMode.BOTH,
+            plot_ja_sites=[SiteName.DMM],
+        )
+        h = ScrapeHandler(
+            repo=repo,
+            factory=RecordingFactory({"dmm": PlotCrawler("日本語のあらすじ")}),
+            resource_store=resource_store,
+            pipeline_config=config,
+            translator=translator,
+        )
+
+        media = await repo.create_media_file(library_id=1, path="/media/MIDV-123.mp4")
+        await h.handle(ScrapePayload(media_file_id=media.id, number="MIDV-123", content_type=ContentType.CENSORED))
+
+        metadata = await repo.get_metadata_by_number("MIDV-123")
+        assert metadata is not None
+        assert metadata.plot == "日本語のあらすじ\n\n[zh_cn]日本語のあらすじ"
+        assert metadata.plot_original == "日本語のあらすじ"
+        assert str(MetadataField.PLOT) in translator.fields
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_both_mode_without_translator_keeps_single_segment(self, repo: Repository, resource_store):
+        """无翻译器时两段同值, 不重复拼接."""
+        config = _config_with(
+            {ContentType.CENSORED: [SiteName.DMM]},
+            plot_mode=PlotMode.BOTH,
+            plot_ja_sites=[SiteName.DMM],
+        )
+        h = ScrapeHandler(
+            repo=repo,
+            factory=RecordingFactory({"dmm": PlotCrawler("日本語のあらすじ")}),
+            resource_store=resource_store,
+            pipeline_config=config,
+        )
+
+        media = await repo.create_media_file(library_id=1, path="/media/MIDV-123.mp4")
+        await h.handle(ScrapePayload(media_file_id=media.id, number="MIDV-123", content_type=ContentType.CENSORED))
+
+        metadata = await repo.get_metadata_by_number("MIDV-123")
+        assert metadata is not None
+        assert metadata.plot == "日本語のあらすじ"
+        assert metadata.plot_original == "日本語のあらすじ"
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_separator_newline(self, repo: Repository, resource_store):
+        config = _config_with(
+            {ContentType.CENSORED: [SiteName.JAVDB, SiteName.DMM]},
+            plot_mode=PlotMode.BOTH,
+            plot_ja_sites=[SiteName.DMM],
+            plot_zh_sites=[SiteName.JAVDB],
+            plot_separator=PlotSeparator.NEWLINE,
+        )
+        h = ScrapeHandler(
+            repo=repo,
+            factory=RecordingFactory({"javdb": PlotCrawler("中文简介"), "dmm": PlotCrawler("日本語のあらすじ")}),
+            resource_store=resource_store,
+            pipeline_config=config,
+        )
+
+        media = await repo.create_media_file(library_id=1, path="/media/MIDV-123.mp4")
+        await h.handle(ScrapePayload(media_file_id=media.id, number="MIDV-123", content_type=ContentType.CENSORED))
+
+        metadata = await repo.get_metadata_by_number("MIDV-123")
+        assert metadata is not None
+        assert metadata.plot == "日本語のあらすじ\n中文简介"
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_single_mode_leaves_original_empty(self, repo: Repository, resource_store):
+        config = _config_with(
+            {ContentType.CENSORED: [SiteName.JAVDB, SiteName.DMM]},
+            plot_ja_sites=[SiteName.DMM],
+            plot_zh_sites=[SiteName.JAVDB],
+        )
+        h = ScrapeHandler(
+            repo=repo,
+            factory=RecordingFactory({"javdb": PlotCrawler("中文简介"), "dmm": PlotCrawler("日本語のあらすじ")}),
+            resource_store=resource_store,
+            pipeline_config=config,
+        )
+
+        media = await repo.create_media_file(library_id=1, path="/media/MIDV-123.mp4")
+        await h.handle(ScrapePayload(media_file_id=media.id, number="MIDV-123", content_type=ContentType.CENSORED))
+
+        metadata = await repo.get_metadata_by_number("MIDV-123")
+        assert metadata is not None
+        assert metadata.plot == "中文简介"
+        assert metadata.plot_original is None
 
 
 # --- RefreshHandler 测试 ---
@@ -1073,3 +1222,122 @@ class TestRefreshHandler:
         assert result.result.scrape == n
         scrapes = [f for f in (result.followups or []) if f.task_type == TaskType.SCRAPE]
         assert len(scrapes) == n
+
+
+# --- 官方图源直构兜底 ---
+
+
+class ImageCrawler:
+    """返回固定图片地址的爬虫, 供直构兜底断言使用."""
+
+    def __init__(self, number: str, *, poster: str = "", thumb: str = ""):
+        self._number = number
+        self._poster = poster
+        self._thumb = thumb
+
+    async def fetch(self, query, options=None) -> MediaMetadata | None:
+        return MediaMetadata(
+            number=self._number,
+            poster_urls=[self._poster] if self._poster else [],
+            thumb_urls=[self._thumb] if self._thumb else [],
+        )
+
+
+_DMM_PS = "https://awsimgsrc.dmm.co.jp/pics_dig/digital/video"
+_MGSTAGE_IMG = "https://image.mgstage.com/images"
+
+
+class TestImageFallback:
+    @staticmethod
+    async def _scrape(repo: Repository, resource_store, number: str, *, store=None, **scraping_kwargs):
+        config = _config_with({ContentType.CENSORED: [SiteName.JAVDB]}, **scraping_kwargs)
+        crawler = ImageCrawler(number)
+        h = ScrapeHandler(
+            repo=repo,
+            factory=RecordingFactory({"javdb": crawler}),
+            resource_store=resource_store,
+            pipeline_config=config,
+            dmm_prefix_store=store,
+        )
+        result = await h.handle(ScrapePayload(number=number, content_type=ContentType.CENSORED))
+        assert result.success is True
+        metadata = await repo.get_metadata_by_number(number)
+        assert metadata is not None
+        return metadata
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_disabled_by_default(self, repo: Repository, resource_store):
+        metadata = await self._scrape(repo, resource_store, "ABF-295")
+        assert metadata.poster_urls == []
+        assert metadata.thumb_urls == []
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_dmm_candidates_appended(self, repo: Repository, resource_store):
+        """候选追加在尾部: 官方竖版进海报链, 横版进封面链."""
+        metadata = await self._scrape(repo, resource_store, "ABF-295", dmm_image_fallback=True)
+        assert metadata.poster_urls == [
+            f"{_DMM_PS}/436abf00295/436abf00295ps.jpg",
+            f"{_DMM_PS}/abf00295/abf00295ps.jpg",
+        ]
+        assert metadata.thumb_urls == [
+            f"{_DMM_PS}/436abf00295/436abf00295pl.jpg",
+            f"{_DMM_PS}/abf00295/abf00295pl.jpg",
+        ]
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_dmm_candidates_dedupe_existing(self, repo: Repository, resource_store):
+        exist_ps = f"{_DMM_PS}/436abf00295/436abf00295ps.jpg"
+        exist_pl = f"{_DMM_PS}/436abf00295/436abf00295pl.jpg"
+        config = _config_with({ContentType.CENSORED: [SiteName.JAVDB]}, dmm_image_fallback=True)
+        h = ScrapeHandler(
+            repo=repo,
+            factory=RecordingFactory({"javdb": ImageCrawler("ABF-295", poster=exist_ps, thumb=exist_pl)}),
+            resource_store=resource_store,
+            pipeline_config=config,
+        )
+        result = await h.handle(ScrapePayload(number="ABF-295", content_type=ContentType.CENSORED))
+        assert result.success is True
+
+        metadata = await repo.get_metadata_by_number("ABF-295")
+        assert metadata is not None
+        assert metadata.poster_urls == [exist_ps, f"{_DMM_PS}/abf00295/abf00295ps.jpg"]
+        assert metadata.thumb_urls == [exist_pl, f"{_DMM_PS}/abf00295/abf00295pl.jpg"]
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_dmm_skips_uncensored(self, repo: Repository, resource_store):
+        metadata = await self._scrape(repo, resource_store, "FC2-PPV-123456", dmm_image_fallback=True)
+        assert metadata.poster_urls == []
+        assert metadata.thumb_urls == []
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_mgstage_candidates_appended(self, repo: Repository, resource_store):
+        metadata = await self._scrape(repo, resource_store, "259LUXU-1111", mgstage_image_fallback=True)
+        assert metadata.poster_urls == [f"{_MGSTAGE_IMG}/luxutv/259luxu/1111/pf_e_259luxu-1111.jpg"]
+        assert metadata.thumb_urls == [f"{_MGSTAGE_IMG}/luxutv/259luxu/1111/pb_e_259luxu-1111.jpg"]
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_switches_are_independent(self, repo: Repository, resource_store):
+        metadata = await self._scrape(repo, resource_store, "ABF-295", mgstage_image_fallback=True)
+        assert metadata.poster_urls == []
+        assert metadata.thumb_urls == []
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_learns_prefix_from_observed_dmm_image(self, repo: Repository, resource_store, tmp_path):
+        store = DmmPrefixStore(tmp_path / "dmm_prefix_learned.json")
+        config = _config_with({ContentType.CENSORED: [SiteName.JAVDB]})
+        h = ScrapeHandler(
+            repo=repo,
+            factory=RecordingFactory(
+                {
+                    "javdb": ImageCrawler(
+                        "ABF-295", thumb="https://pics.dmm.co.jp/digital/video/118abf295/118abf295pl.jpg"
+                    )
+                }
+            ),
+            resource_store=resource_store,
+            pipeline_config=config,
+            dmm_prefix_store=store,
+        )
+        result = await h.handle(ScrapePayload(number="ABF-295", content_type=ContentType.CENSORED))
+        assert result.success is True
+        assert await store.learned("abf") == ([], ["118"])

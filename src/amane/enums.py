@@ -56,6 +56,42 @@ class BrowserMode(StrEnum):
     ALWAYS = "always"
 
 
+# 外部 CF 绕过服务的接口协议: flaresolverr = POST /v1, trawl = POST /scrape (仅 GET).
+class SolverProtocol(StrEnum):
+    FLARESOLVERR = "flaresolverr"
+    TRAWL = "trawl"
+
+
+# 标签取值的跨源策略: off 只取字段链首个非空来源, merge 按链序合并所有来源的标签.
+class TagMergeMode(StrEnum):
+    OFF = "off"
+    MERGE = "merge"
+
+
+# 影片简介取值策略: single 只取字段链首个非空来源, both 分别取日文段与中文段, 日文在前.
+class PlotMode(StrEnum):
+    SINGLE = "single"
+    BOTH = "both"
+
+
+# 中日简介两段之间的分隔符; 具体字符由聚合层之外的拼接方决定.
+class PlotSeparator(StrEnum):
+    BLANK_LINE = "blank_line"
+    NEWLINE = "newline"
+
+
+# 媒体服务器类型: Emby 的 API 根路径带 /emby 前缀, Jellyfin 在站点根.
+class MediaServerType(StrEnum):
+    EMBY = "emby"
+    JELLYFIN = "jellyfin"
+
+
+# 人物简介回写策略: replace 覆盖服务器简介, append_original 在本地简介后追加服务器原简介.
+class OverviewMode(StrEnum):
+    REPLACE = "replace"
+    APPEND_ORIGINAL = "append_original"
+
+
 # 大模型上游协议: chat = OpenAI Chat Completions, response = OpenAI Responses, anthropic = Anthropic Messages.
 class ApiType(StrEnum):
     CHAT = "chat"

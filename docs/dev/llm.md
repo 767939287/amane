@@ -20,7 +20,7 @@
 
 接入位置在 `ScrapeHandler.handle`: `aggregate()` 之后、`upsert_metadata()` 之前. 翻译是对 `AggregatedMetadata` 文本字段的**就地变换**, 与 image materialize 并列为聚合后的后处理步骤.
 
-- **按条件跳过**: translator 为 `None` (未配置) 或单字段翻译抛异常时保留原值、不阻断刮削 — 与资源物化同款策略.
+- **按条件跳过**: translator 为 `None` (未配置) 或单字段翻译抛异常时保留原值、不阻断刮削 — 与资源物化同款策略. `plot_mode=both` 且已有中文站原文时也不翻译 `plot`, 判据见 [task-system.md](task-system.md).
 - **缓存语义不变**: `Metadata.raw` 仍存**源语言**站点快照; 译文是派生值, 写入 `Metadata` 标量字段.
 - **独立限速**: LLM 端点用自己的 `AsyncLimiter`, 与站点 host 限速器隔离.
 - **覆盖字段**: 由 `llm.translate_fields` 控制, 当前仅文本标量. 扩展到 tags / series 等须在 `_translate_metadata` 显式列出 (项目禁反射).

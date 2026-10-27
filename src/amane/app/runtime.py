@@ -14,12 +14,15 @@ from ..config import R18Config
 from ..crawlers import actor_registry, registry
 from ..crawlers.base import CrawlerProfile
 from ..crawlers.factory import CrawlerFactory
+from ..crawlers.fallback import DmmPrefixStore
 from ..crawlers.http import HttpClient
 from ..crawlers.r18dev import R18Database
 from ..db.models import TaskType
 from ..enums import BrowserBackendName, BrowserMode, SiteName
 from ..handlers import (
+    ActorImportHandler,
     ActorScrapeHandler,
+    ActorSyncHandler,
     CleanupHandler,
     DeleteHandler,
     LibraryTaskLocks,
@@ -136,6 +139,9 @@ def build_network_stack(
         browser = BrowserPool(
             default_backend=hot.network.browser.backend,
             solver_url=hot.network.browser.solver_url,
+            solver_protocol=hot.network.browser.solver_protocol,
+            bypass_proxy=hot.network.browser.bypass_proxy,
+            trusted_hosts=hot.network.browser.trusted_hosts,
             proxy=hot.network.proxy,
             web_client=web_client,
             timeout_ms=hot.network.browser.timeout,
@@ -540,8 +546,11 @@ def build_handlers(
             web_client,
             translator,
             plugin_manager.descriptors() if plugin_manager is not None else None,
+            dmm_prefix_store=(DmmPrefixStore(state_dir / "dmm_prefix_learned.json") if state_dir is not None else None),
         ),
         TaskType.ACTOR_SCRAPE: ActorScrapeHandler(repo, factory, resource_store, hot, web_client),
+        TaskType.ACTOR_IMPORT: ActorImportHandler(repo, hot, web_client),
+        TaskType.ACTOR_SYNC: ActorSyncHandler(repo, hot, web_client, resource_store),
         TaskType.ORGANIZE: OrganizeHandler(
             repo,
             hot,

@@ -82,6 +82,12 @@ Worker 替换不取消运行中任务: `_rebuild()` 构建新 worker 后旧 work
 
 `field_priority` 是稀疏字段例外: 只写需要提前尝试的站; 编译时与该类型路由求交后前置, 其余路由站点保序回退. `field_blacklist` 是稀疏字段排除: 只写该字段不采用的站. 二者同时列出同一站时以字段排除为准. 不在该类型路由中的站无效, 也不额外发请求. 取值顺序与空值回退见 [task-system.md](task-system.md).
 
+`tag_merge` 只影响 `tags`: `merge` 走跨源并集, `off` 沿用单源取值. 合并仍在编译后的 tags 字段链内进行, 因此字段优先级与字段排除照旧生效, 见 [task-system.md](task-system.md).
+
+`plot_mode=both` 把 `plot` 拆成日文段与中文段: `plot_ja_sites` / `plot_zh_sites` 是两段的候选站 (空 = 不限站), 同样只在编译后的 plot 字段链内挑选. `plot_separator` 只决定两段之间的分隔符, 语义名到字符的映射在 handler. 取值与拼接分工见 [task-system.md](task-system.md).
+
+`dmm_image_fallback` / `mgstage_image_fallback` 是两张位图的官方直构兜底, 互不影响. 候选只追加到链尾, 因此不改变站点图源的优先级; 前缀表与学习表契约见 [crawlers.md](crawlers.md).
+
 外部影片来源的 descriptor 参与路由校验: 声明 `content_types` 时路由类型必须在声明集合内, 声明 `metadata_fields` 时字段优先级与字段排除只能选择声明过的字段; `traits` 决定来源的多语言节点展开与聚合分段.
 
 建图对编译后站点链的消费见 [task-system.md](task-system.md), 默认表取舍见 [content-routes.md](content-routes.md).

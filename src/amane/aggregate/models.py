@@ -21,6 +21,8 @@ class AggregatedMetadata:
     runtime: int | None = None
     series: str | None = None
     plot: str | None = None
+    #: ``plot_mode=both`` 的日文段; 拼接与落库由 handler 负责.
+    plot_original: str | None = None
     actors: list[FilmActor] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     directors: list[str] = field(default_factory=list)

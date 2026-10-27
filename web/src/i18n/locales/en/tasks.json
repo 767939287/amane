@@ -69,6 +69,8 @@
     "refresh": "Refresh",
     "r18_import": "R18 Import",
     "actor_scrape": "Actor Scrape",
+    "actor_import": "Server Import",
+    "actor_sync": "Server Write-back",
     "rescrape": "Rescrape",
     "scan_invalid": "Scan unwanted",
     "delete": "Delete"
@@ -160,6 +162,8 @@
       "refresh": "Refresh",
       "r18_import": "R18 Import",
       "actor_scrape": "Actor Scrape",
+      "actor_import": "Import server persons",
+      "actor_sync": "Write to server",
       "rescrape": "Rescrape",
       "scan_invalid": "Scan unwanted",
       "delete": "Delete"
@@ -326,6 +330,13 @@
             "trans": "Translation cache"
           }
         }
+      }
+    },
+    "actor_import": {},
+    "actor_sync": {
+      "actor_ids": {
+        "label": "Actor IDs",
+        "description": "Actors to write back to the server"
       }
     },
     "number": "Number",
