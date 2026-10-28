@@ -269,22 +269,36 @@ export type ActorScrapeAllResult = {
      * Submitted
      */
     submitted: number;
+    /**
+     * Done
+     */
+    done?: number;
+    /**
+     * Total
+     */
+    total?: number;
+    /**
+     * Has More
+     */
+    has_more?: boolean;
 };
 
 /**
  * ActorScrapeAllSubmission
+ *
+ * 只接受对外可控的选项; 游标与进度由后继批次自行携带, 不对外开放.
  */
 export type ActorScrapeAllSubmission = {
+    /**
+     * Type
+     */
+    type: 'actor_scrape_all';
     /**
      * Use Cache
      *
      * 派生的 ACTOR_SCRAPE 共用的缓存种类 (metadata: 复用 Actor.raw; trans: 预留译文). 空集 = 全部强制刷新
      */
     use_cache?: Array<CacheKind>;
-    /**
-     * Type
-     */
-    type: 'actor_scrape_all';
 };
 
 /**
@@ -5430,6 +5444,10 @@ export type WorkerConfig = {
      * Concurrency
      */
     concurrency?: number;
+    /**
+     * Scrape Concurrency
+     */
+    scrape_concurrency?: number;
     /**
      * Poll Interval
      */

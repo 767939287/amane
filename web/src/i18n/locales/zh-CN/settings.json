@@ -687,6 +687,10 @@
         "label": "并发数",
         "description": "同时执行的最大任务数"
       },
+      "scrape_concurrency": {
+        "label": "刮削并发数",
+        "description": "影片与演员刮削各自同时运行的任务数上限; 0 表示不限制, 设为 1 即每个刮削依次执行"
+      },
       "poll_interval": {
         "label": "轮询间隔",
         "description": "任务队列检查间隔 (秒)"

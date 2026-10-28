@@ -84,7 +84,7 @@ async def resolve_submission(req: TaskSubmission, repo: Repository) -> tuple[Tas
         case ActorScrapeSubmission():
             return TaskType.ACTOR_SCRAPE, ActorScrapePayload(actor_id=req.actor_id, use_cache=req.use_cache)
         case ActorScrapeAllSubmission():
-            return TaskType.ACTOR_SCRAPE_ALL, req
+            return TaskType.ACTOR_SCRAPE_ALL, ActorScrapeAllPayload(use_cache=req.use_cache)
         case ActorImportSubmission():
             return TaskType.ACTOR_IMPORT, ActorImportPayload()
         case ActorSyncSubmission():

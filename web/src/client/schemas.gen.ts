@@ -417,6 +417,21 @@ export const ActorScrapeAllResultSchema = {
         submitted: {
             type: 'integer',
             title: 'Submitted'
+        },
+        done: {
+            type: 'integer',
+            title: 'Done',
+            default: 0
+        },
+        total: {
+            type: 'integer',
+            title: 'Total',
+            default: 0
+        },
+        has_more: {
+            type: 'boolean',
+            title: 'Has More',
+            default: false
         }
     },
     type: 'object',
@@ -428,6 +443,11 @@ export const ActorScrapeAllResultSchema = {
 
 export const ActorScrapeAllSubmissionSchema = {
     properties: {
+        type: {
+            type: 'string',
+            const: 'actor_scrape_all',
+            title: 'Type'
+        },
         use_cache: {
             items: {
                 $ref: '#/components/schemas/CacheKind'
@@ -436,18 +456,14 @@ export const ActorScrapeAllSubmissionSchema = {
             uniqueItems: true,
             title: 'Use Cache',
             description: '派生的 ACTOR_SCRAPE 共用的缓存种类 (metadata: 复用 Actor.raw; trans: 预留译文). 空集 = 全部强制刷新'
-        },
-        type: {
-            type: 'string',
-            const: 'actor_scrape_all',
-            title: 'Type'
         }
     },
     type: 'object',
     required: [
         'type'
     ],
-    title: 'ActorScrapeAllSubmission'
+    title: 'ActorScrapeAllSubmission',
+    description: '只接受对外可控的选项; 游标与进度由后继批次自行携带, 不对外开放.'
 } as const;
 
 export const ActorScrapeRequestSchema = {
@@ -3621,6 +3637,7 @@ export const HotSettingsSchema = {
             $ref: '#/components/schemas/WorkerConfig',
             default: {
                 concurrency: 10,
+                scrape_concurrency: 0,
                 poll_interval: 2,
                 shutdown_timeout: 0
             }
@@ -10332,6 +10349,13 @@ export const WorkerConfigSchema = {
             minimum: 1,
             title: 'Concurrency',
             default: 10
+        },
+        scrape_concurrency: {
+            type: 'integer',
+            maximum: 64,
+            minimum: 0,
+            title: 'Scrape Concurrency',
+            default: 0
         },
         poll_interval: {
             type: 'number',

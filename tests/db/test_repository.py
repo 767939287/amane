@@ -1446,6 +1446,55 @@ class TestTaskRepo:
         assert await repo.claim_next_task() is None
 
     @pytest.mark.asyncio(loop_scope="function")
+    async def test_claim_limits_are_per_type(self, repo: Repository):
+        """上限按类型分别计数: 影片满了不影响演员, 反之亦然."""
+        await repo.create_task(task_type=TaskType.SCRAPE, payload={})
+        await repo.create_task(task_type=TaskType.ACTOR_SCRAPE, payload={"actor_id": 1})
+        limits = {TaskType.SCRAPE: 1, TaskType.ACTOR_SCRAPE: 1}
+
+        first = await repo.claim_next_task(limits=limits)
+        second = await repo.claim_next_task(limits=limits)
+        assert first is not None and second is not None
+        assert {first.type, second.type} == {TaskType.SCRAPE, TaskType.ACTOR_SCRAPE}
+        assert await repo.claim_next_task(limits=limits) is None
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_claim_limit_does_not_block_other_types(self, repo: Repository):
+        await repo.create_task(task_type=TaskType.SCRAPE, payload={}, priority=10)
+        await repo.create_task(task_type=TaskType.REFRESH, payload={"library_id": 1}, priority=1)
+        limits = {TaskType.SCRAPE: 1}
+
+        blocked_type = await repo.claim_next_task(limits=limits)
+        assert blocked_type is not None
+        assert blocked_type.type is TaskType.SCRAPE
+        # 刮削已到上限: 优先级更低的其它类型照常认领, 不必等刮削完成
+        other = await repo.claim_next_task(limits=limits)
+        assert other is not None
+        assert other.type is TaskType.REFRESH
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_claim_limit_counts_running_rows(self, repo: Repository):
+        for _ in range(3):
+            await repo.create_task(task_type=TaskType.SCRAPE, payload={})
+        limits = {TaskType.SCRAPE: 2}
+
+        assert await repo.claim_next_task(limits=limits) is not None
+        assert await repo.claim_next_task(limits=limits) is not None
+        assert await repo.claim_next_task(limits=limits) is None
+        # 不传 limits (开关热关闭) 立即恢复原行为
+        assert await repo.claim_next_task() is not None
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_claim_limit_holds_under_concurrent_claims(self, repo: Repository):
+        """判定与认领须串行, 否则并发认领会一起越过上限."""
+        for _ in range(3):
+            await repo.create_task(task_type=TaskType.SCRAPE, payload={})
+        limits = {TaskType.SCRAPE: 1}
+
+        results = await asyncio.gather(*(repo.claim_next_task(limits=limits) for _ in range(3)))
+        assert sum(1 for row in results if row is not None) == 1
+
+    @pytest.mark.asyncio(loop_scope="function")
     async def test_complete_task(self, repo: Repository):
         task = await repo.create_task(task_type=TaskType.SCRAPE, payload={})
         assert task.id is not None

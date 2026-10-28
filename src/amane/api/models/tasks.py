@@ -9,7 +9,6 @@ from ...db import MediaFile, Repository, TaskStatus, TaskType
 from ...handlers import (
     ActorImportPayload,
     ActorImportResult,
-    ActorScrapeAllPayload,
     ActorScrapeAllResult,
     ActorScrapeResult,
     ActorSyncPayload,
@@ -264,8 +263,14 @@ class ActorScrapeSubmission(BaseModel):
     )
 
 
-class ActorScrapeAllSubmission(ActorScrapeAllPayload):
+class ActorScrapeAllSubmission(BaseModel):
+    """只接受对外可控的选项; 游标与进度由后继批次自行携带, 不对外开放."""
+
     type: Literal["actor_scrape_all"]
+    use_cache: set[CacheKind] = Field(
+        default_factory=lambda: {CacheKind.metadata, CacheKind.trans},
+        description="派生的 ACTOR_SCRAPE 共用的缓存种类 (metadata: 复用 Actor.raw; trans: 预留译文). 空集 = 全部强制刷新",
+    )
 
 
 class ActorImportSubmission(ActorImportPayload):

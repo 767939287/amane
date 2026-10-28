@@ -2,7 +2,7 @@ from collections.abc import Collection, Sequence
 from datetime import datetime
 from typing import Unpack, cast
 
-from sqlalchemy import asc
+from sqlalchemy import asc, func
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -282,11 +282,18 @@ class FacetsRepoMixin(RepositoryMixinBase):
             rows = (await session.exec(select(Actor.id, Actor.name).where(col(Actor.id).in_(ids)))).all()
             return {int(i): str(n) for i, n in rows if i is not None}
 
-    async def list_actor_ids(self) -> list[int]:
-        """全部演员 ID, 升序; 供批量扇出, 不读行内容."""
+    async def list_actor_ids(self, *, after_id: int = 0, limit: int | None = None) -> list[int]:
+        """演员 ID 升序; 供批量扇出, 不读行内容. ``after_id`` 为 keyset 游标, 与 ``limit`` 配合分批."""
         async with self._session() as session:
-            rows = (await session.exec(select(Actor.id).order_by(asc(col(Actor.id))))).all()
+            stmt = select(Actor.id).where(col(Actor.id) > after_id).order_by(asc(col(Actor.id)))
+            if limit is not None:
+                stmt = stmt.limit(limit)
+            rows = (await session.exec(stmt)).all()
             return [int(actor_id) for actor_id in rows if actor_id is not None]
+
+    async def count_actors(self) -> int:
+        async with self._session() as session:
+            return int((await session.exec(select(func.count()).select_from(Actor))).one())
 
     async def get_actors_by_names(self, names: Sequence[str]) -> list[Actor]:
         """按展示名批量查; 不存在的名字不出现."""

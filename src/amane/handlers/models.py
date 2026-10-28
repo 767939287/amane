@@ -325,18 +325,26 @@ class ActorScrapeResult(BaseModel):
 
 
 class ActorScrapeAllPayload(BaseModel):
-    """为全部演员各派生一个 ACTOR_SCRAPE; 本任务只选择目标, 不访问资料来源."""
+    """为全部演员分批派生 ACTOR_SCRAPE; 本任务只选择目标, 不访问资料来源."""
 
     use_cache: set[CacheKind] = Field(
         default_factory=lambda: {CacheKind.metadata, CacheKind.trans},
         description="派生的 ACTOR_SCRAPE 共用的缓存种类 (metadata: 复用 Actor.raw; trans: 预留译文). 空集 = 全部强制刷新",
     )
+    after_id: int = Field(default=0, ge=0, description="游标: 只处理 id 更大的演员; 后继批次自动推进")
+    done: int = Field(default=0, ge=0, description="此前批次已派生的条数, 只用于进度")
 
 
 class ActorScrapeAllResult(BaseModel):
     type: Literal[TaskType.ACTOR_SCRAPE_ALL] = TaskType.ACTOR_SCRAPE_ALL
     submitted: int
-    """派生的 ACTOR_SCRAPE 条数; 演员已有 queued / running 任务时复用该行, 同样计入."""
+    """本批派生的 ACTOR_SCRAPE 条数; 演员已有 queued / running 任务时复用该行, 同样计入."""
+    done: int = 0
+    """累计已派生的条数 (含本批)."""
+    total: int = 0
+    """演员总数."""
+    has_more: bool = False
+    """是否还有后继批次."""
 
 
 # --- MEDIA SERVER ---

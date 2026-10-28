@@ -264,10 +264,10 @@ async def test_stop_workers_bounds_stuck_claim(
     real_commit = AsyncSession.commit
     blocked = False
 
-    async def marked_claim(self: Repository) -> Task | None:
+    async def marked_claim(self: Repository, *, limits: dict[TaskType, int] | None = None) -> Task | None:
         in_claim.set(True)
         try:
-            return await real_claim(self)
+            return await real_claim(self, limits=limits)
         finally:
             in_claim.set(False)
 

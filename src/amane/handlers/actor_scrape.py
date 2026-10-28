@@ -217,27 +217,62 @@ class ActorScrapeHandler(TaskHandler[ActorScrapePayload, ActorScrapeResult]):
         )
 
 
+# 每批派生的后继条数. 批量大则单事务写锁窗口长, 批量小则任务树层数多.
+ACTOR_SCRAPE_BATCH = 200
+
+
 class ActorScrapeAllHandler(TaskHandler[ActorScrapeAllPayload, ActorScrapeAllResult]):
-    """为全部演员各派生一个 ACTOR_SCRAPE; 本任务不访问资料来源, 也不读写演员字段."""
+    """按 id 游标分批为演员派生 ACTOR_SCRAPE; 本任务不访问资料来源, 也不读写演员字段.
+
+    每批只覆盖 ``ACTOR_SCRAPE_BATCH`` 条后继, 余下部分以携带游标的同类任务续跑:
+    单事务的插入量与写锁时长与库内演员总数脱钩.
+    """
 
     def __init__(self, repo: Repository) -> None:
         super().__init__(payload_t=ActorScrapeAllPayload, result_t=ActorScrapeAllResult)
         self._repo = repo
 
     async def handle(self, payload: ActorScrapeAllPayload) -> TaskResult[ActorScrapeAllResult]:
-        actor_ids = await self._repo.list_actor_ids()
+        total = await self._repo.count_actors()
+        # 多取一条判断是否还有下一批, 省掉一次计数查询.
+        ids = await self._repo.list_actor_ids(after_id=payload.after_id, limit=ACTOR_SCRAPE_BATCH + 1)
+        has_more = len(ids) > ACTOR_SCRAPE_BATCH
+        ids = ids[:ACTOR_SCRAPE_BATCH]
+
         followups = [
             FollowupTask(
                 key=f"actor-scrape:{actor_id}",
                 task_type=TaskType.ACTOR_SCRAPE,
                 payload=ActorScrapePayload(actor_id=actor_id, use_cache=payload.use_cache).model_dump(mode="json"),
+                priority=-1,
             )
-            for actor_id in actor_ids
+            for actor_id in ids
         ]
-        current().info("actor scrape all fan-out", total=len(followups))
+        done = payload.done + len(ids)
+        if has_more:
+            followups.append(
+                FollowupTask(
+                    key=f"actor-scrape-all:{ids[-1]}",
+                    task_type=TaskType.ACTOR_SCRAPE_ALL,
+                    payload=ActorScrapeAllPayload(use_cache=payload.use_cache, after_id=ids[-1], done=done).model_dump(
+                        mode="json"
+                    ),
+                )
+            )
+
+        total = max(total, done)
+        if total > 0:
+            await self.report_progress(done, total, f"queued {len(ids)}")
+        current().info(
+            "actor scrape all fan-out",
+            total=total,
+            done=done,
+            batch=len(ids),
+            has_more=has_more,
+        )
         return TaskResult(
             success=True,
-            result=ActorScrapeAllResult(submitted=len(followups)),
+            result=ActorScrapeAllResult(submitted=len(ids), done=done, total=total, has_more=has_more),
             followups=followups,
         )
 

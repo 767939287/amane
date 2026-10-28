@@ -687,6 +687,10 @@
         "label": "Concurrency",
         "description": "Maximum number of tasks to run at once"
       },
+      "scrape_concurrency": {
+        "label": "Scrape concurrency",
+        "description": "Max concurrent scrape tasks, counted separately for films and for actors; 0 means unlimited, 1 runs them one at a time"
+      },
       "poll_interval": {
         "label": "Poll Interval",
         "description": "Task queue check interval (seconds)"

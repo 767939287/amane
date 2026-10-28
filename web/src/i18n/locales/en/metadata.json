@@ -267,8 +267,9 @@
     "importFromServer": "Import from server",
     "importQueued": "Import task queued",
     "scrapeAll": "Scrape all",
-    "scrapeAllConfirm": "Queue one scrape for each of the {{count}} actors? Actors already queued or running reuse their existing task.",
+    "scrapeAllConfirm": "Queue scraping for all {{count}} actors? Work runs in batches; actors already queued or running reuse their existing task.",
     "scrapeAllQueued": "Scrape-all task queued",
+    "scrapeAllTimeout": "Request timed out, refresh the task list later to confirm submission",
     "scrapeMissingOnPage": "Scrape missing on page",
     "noneMissing": "Nothing missing on this page",
     "birthdayWithAge": "{{date}} (age {{age}})",
@@ -302,8 +303,8 @@
     "viewAll": "View all {{count}}",
     "viewAll_one": "View all {{count}}",
     "viewAll_other": "View all {{count}}",
-    "scrapeAllConfirm_one": "Queue a scrape for the {{count}} actor? Actors already queued or running reuse their existing task.",
-    "scrapeAllConfirm_other": "Queue one scrape for each of the {{count}} actors? Actors already queued or running reuse their existing task."
+    "scrapeAllConfirm_one": "Queue scraping for the {{count}} actor? Actors already queued or running reuse their existing task.",
+    "scrapeAllConfirm_other": "Queue scraping for all {{count}} actors? Work runs in batches; actors already queued or running reuse their existing task."
   },
   "notFound": "Film not found",
   "invalidId": "Invalid film ID",

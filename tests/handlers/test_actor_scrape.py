@@ -15,7 +15,12 @@ from amane.crawlers.block import FailureReason
 from amane.db.models import FacetKind, Task, TaskStatus, TaskType
 from amane.enums import ActorField, ActorGender, SiteName
 from amane.handlers.actor_scrape import ActorScrapeAllHandler, ActorScrapeHandler
-from amane.handlers.models import ActorScrapeAllPayload, ActorScrapePayload, CacheKind
+from amane.handlers.models import (
+    ActorScrapeAllPayload,
+    ActorScrapeAllResult,
+    ActorScrapePayload,
+    CacheKind,
+)
 from amane.media import ResourceStore
 from amane.media.resource_store import RESOURCE_URL_PREFIX
 from amane.net.errors import SourceError
@@ -528,18 +533,26 @@ async def test_actor_scrape_unexpected_records_unexpected(repo: Repository, hot:
 
 
 class TestActorScrapeAll:
-    """全部刮削只扇出 ACTOR_SCRAPE, 不访问资料来源."""
+    """全部刮削按 id 游标分批扇出 ACTOR_SCRAPE, 不访问资料来源."""
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_empty_actor_table(self, repo: Repository) -> None:
+        result = await ActorScrapeAllHandler(repo).handle(ActorScrapeAllPayload())
+        assert result.success
+        assert result.followups == []
+        assert result.result == ActorScrapeAllResult(submitted=0, done=0, total=0, has_more=False)
 
     @pytest.mark.parametrize(
         ("names", "use_cache"),
         [
-            pytest.param([], {CacheKind.metadata}, id="no-actors"),
             pytest.param(["Alice", "Bob"], {CacheKind.metadata, CacheKind.trans}, id="default-cache"),
             pytest.param(["Carol"], set(), id="force-refresh"),
         ],
     )
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_fans_out_every_actor(self, repo: Repository, names: list[str], use_cache: set[CacheKind]) -> None:
+    async def test_single_batch_covers_every_actor(
+        self, repo: Repository, names: list[str], use_cache: set[CacheKind]
+    ) -> None:
         for name in names:
             await repo.upsert_metadata(number=f"AS-{name}", actors=[name])
         actor_ids = await repo.list_actor_ids()
@@ -547,11 +560,63 @@ class TestActorScrapeAll:
 
         result = await ActorScrapeAllHandler(repo).handle(ActorScrapeAllPayload(use_cache=use_cache))
         assert result.success
-        assert result.result is not None
-        assert result.result.submitted == len(names)
         assert [f.payload["actor_id"] for f in result.followups] == actor_ids
         assert {f.key for f in result.followups} == {f"actor-scrape:{i}" for i in actor_ids}
         for followup in result.followups:
-            assert followup.task_type == TaskType.ACTOR_SCRAPE
-            assert followup.priority == 0
+            assert followup.task_type is TaskType.ACTOR_SCRAPE
+            assert followup.priority == -1
             assert set(followup.payload["use_cache"]) == set(use_cache)
+        assert result.result == ActorScrapeAllResult(
+            submitted=len(names), done=len(names), total=len(names), has_more=False
+        )
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_chains_batches_by_cursor(self, repo: Repository, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("amane.handlers.actor_scrape.ACTOR_SCRAPE_BATCH", 2)
+        for name in ("A1", "A2", "A3", "A4", "A5"):
+            await repo.upsert_metadata(number=f"AS-{name}", actors=[name])
+        ids = await repo.list_actor_ids()
+        handler = ActorScrapeAllHandler(repo)
+
+        batches: list[list[int]] = []
+        chain_keys: list[str] = []
+        payload = ActorScrapeAllPayload()
+        while True:
+            result = await handler.handle(payload)
+            assert result.success
+            assert result.result is not None
+            batches.append([f.payload["actor_id"] for f in result.followups if f.task_type is TaskType.ACTOR_SCRAPE])
+            assert result.result.done == sum(len(batch) for batch in batches)
+            assert result.result.total == len(ids)
+            chain = [f for f in result.followups if f.task_type is TaskType.ACTOR_SCRAPE_ALL]
+            if not chain:
+                assert result.result.has_more is False
+                break
+            assert result.result.has_more is True
+            assert len(chain) == 1
+            assert chain[0].priority == 0
+            chain_keys.append(chain[0].key)
+            payload = ActorScrapeAllPayload.model_validate(chain[0].payload)
+
+        # 每批首尾相接, 不重复不遗漏.
+        assert [actor_id for batch in batches for actor_id in batch] == ids
+        assert [len(batch) for batch in batches] == [2, 2, 1]
+        assert chain_keys == [f"actor-scrape-all:{ids[1]}", f"actor-scrape-all:{ids[3]}"]
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_reports_batch_progress(self, repo: Repository, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("amane.handlers.actor_scrape.ACTOR_SCRAPE_BATCH", 2)
+        for name in ("P1", "P2", "P3"):
+            await repo.upsert_metadata(number=f"AS-{name}", actors=[name])
+        calls: list[tuple[int, int]] = []
+        handler = ActorScrapeAllHandler(repo)
+
+        async def _record(current: int, total: int, _message: str = "") -> None:
+            calls.append((current, total))
+
+        handler.set_progress_callback(_record)
+        result = await handler.handle(ActorScrapeAllPayload())
+        assert calls == [(2, 3)]
+        chain = next(f for f in result.followups if f.task_type is TaskType.ACTOR_SCRAPE_ALL)
+        await handler.handle(ActorScrapeAllPayload.model_validate(chain.payload))
+        assert calls == [(2, 3), (3, 3)]

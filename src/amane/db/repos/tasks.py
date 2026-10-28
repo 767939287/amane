@@ -1,4 +1,4 @@
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 
 from pydantic import BaseModel
 from sqlalchemy import asc, update
@@ -47,31 +47,47 @@ def _exclusive_value(payload: dict[str, object], field: str) -> int | None:
     return raw
 
 
-async def _find_active_exclusive(session: AsyncSession, task_type: TaskType, field: str, value: int) -> Task | None:
+# 一个入队事务的互斥键索引, 键为 (任务类型, 互斥字段). 由 `_resolve_task` 首次用到时填充.
+_ActiveExclusive = dict[tuple[TaskType, str], dict[int, Task]]
+
+
+async def _preload_exclusive(session: AsyncSession, task_type: TaskType, field: str) -> dict[int, Task]:
+    """该类型 queued / running 行的互斥键 -> 行. 每个入队事务只取一次, 逐条入队不再回表."""
     stmt = select(Task).where(col(Task.type) == task_type, col(Task.status).in_(_ACTIVE_STATUSES))
-    result = await session.exec(stmt)
-    for task in result.all():
-        if _exclusive_value(task.payload or {}, field) == value:
-            return task
-    return None
+    out: dict[int, Task] = {}
+    for task in (await session.exec(stmt)).all():
+        value = _exclusive_value(task.payload or {}, field)
+        if value is not None:
+            out.setdefault(value, task)
+    return out
 
 
-async def _insert_or_reuse(
+async def _resolve_task(
     session: AsyncSession,
     task_type: TaskType,
     payload: dict[str, object],
     priority: int,
+    active: _ActiveExclusive,
 ) -> Task:
+    """有队列互斥命中则返回既有行, 否则新建一条待 flush 的行.
+
+    新建行立即记进 ``active``: 同一事务内后续同键条目复用它, 不必先落库再查回.
+    """
     field = _EXCLUSIVE_FIELDS.get(task_type)
-    if field is not None:
-        value = _exclusive_value(payload, field)
-        if value is not None:
-            existing = await _find_active_exclusive(session, task_type, field, value)
-            if existing is not None:
-                return existing
+    value = _exclusive_value(payload, field) if field is not None else None
+    if field is None or value is None:
+        task = Task(type=task_type, payload=payload, priority=priority)
+        session.add(task)
+        return task
+    known = active.get((task_type, field))
+    if known is None:
+        known = active[(task_type, field)] = await _preload_exclusive(session, task_type, field)
+    existing = known.get(value)
+    if existing is not None:
+        return existing
     task = Task(type=task_type, payload=payload, priority=priority)
     session.add(task)
-    await session.flush()
+    known[value] = task
     return task
 
 
@@ -84,6 +100,18 @@ def _matching_root_ids(
     """有 root 用 root, 裸任务用自身 id."""
     stmt = select(coalesce(col(Task.root_task_id), col(Task.id)))
     return _scope_tasks(stmt, statuses=statuses, task_types=task_types).distinct()
+
+
+async def _types_at_limit(session: AsyncSession, limits: Mapping[TaskType, int]) -> list[TaskType]:
+    """已达同时运行上限的类型; ``limits`` 为空时不查库."""
+    if not limits:
+        return []
+    stmt = select(col(Task.type), count()).where(col(Task.status) == TaskStatus.RUNNING).group_by(col(Task.type))
+    running: dict[TaskType, int] = {}
+    for task_type, n in (await session.exec(stmt)).all():
+        key = task_type if isinstance(task_type, TaskType) else TaskType(task_type)
+        running[key] = int(n)
+    return [task_type for task_type, cap in limits.items() if running.get(task_type, 0) >= cap]
 
 
 async def _ids_with_external_descendants(session: AsyncSession, ids: Sequence[int]) -> set[int]:
@@ -146,27 +174,32 @@ class TasksRepoMixin(RepositoryMixinBase):
         if not payloads:
             return []
         async with self._task_insert_lock, self._session() as session:
+            active: _ActiveExclusive = {}
             tasks = [
-                await _insert_or_reuse(session, task_type, _payload_dict(payload), priority) for payload in payloads
+                await _resolve_task(session, task_type, _payload_dict(payload), priority, active)
+                for payload in payloads
             ]
+            # 一次 flush 拿全部主键; 已提交行由 expire_on_commit=False 保持可用, 无需逐条 refresh.
+            await session.flush()
             await session.commit()
-            for task in tasks:
-                await session.refresh(task)
             return tasks
 
     async def get_task(self, task_id: int) -> Task | None:
         async with self._session() as session:
             return await session.get(Task, task_id)
 
-    async def claim_next_task(self) -> Task | None:
-        """认领优先级最高的 QUEUED 行, 标为 RUNNING."""
-        async with self._session() as session:
-            stmt = (
-                select(Task)
-                .where(Task.status == TaskStatus.QUEUED)
-                .order_by(col(Task.priority).desc(), asc(col(Task.created_at)))
-                .limit(1)
-            )
+    async def claim_next_task(self, *, limits: Mapping[TaskType, int] | None = None) -> Task | None:
+        """认领优先级最高的 QUEUED 行, 标为 RUNNING.
+
+        ``limits`` 给出各类型的同时运行上限: 已达上限的类型本次不认领, 其任务保持 QUEUED,
+        既不占并发槽也不阻塞其它类型. RUNNING 只由本方法写入, 因此判定与认领落在同一把锁内即可成立.
+        """
+        async with self._claim_lock, self._session() as session:
+            stmt = select(Task).where(Task.status == TaskStatus.QUEUED)
+            blocked = await _types_at_limit(session, limits or {})
+            if blocked:
+                stmt = stmt.where(col(Task.type).notin_(blocked))
+            stmt = stmt.order_by(col(Task.priority).desc(), asc(col(Task.created_at))).limit(1)
             result = await session.exec(stmt)
             task = result.first()
             if task is None:
@@ -211,20 +244,27 @@ class TasksRepoMixin(RepositoryMixinBase):
             session.add(task)
             root_id = task.root_task_id or task.id
             seen_keys: set[str] = set()
+            active: _ActiveExclusive = {}
+            edges: list[tuple[str, Task]] = []
             for key, task_type, payload, priority in followups:
                 if key in seen_keys:
                     continue
                 seen_keys.add(key)
-                child = await _insert_or_reuse(session, task_type, payload, priority)
+                child = await _resolve_task(session, task_type, payload, priority, active)
                 if child.root_task_id is None:
                     child.root_task_id = root_id
                     session.add(child)
-                assert child.id is not None
-                session.add(TaskLink(parent_task_id=task_id, child_task_id=child.id, key=key))
+                edges.append((key, child))
                 created.append(child)
+            # 先一次 flush 拿到全部子任务主键, 再批量写边: 语句数与后继条数线性相关.
+            await session.flush()
+            links: list[TaskLink] = []
+            for key, child in edges:
+                if child.id is None:
+                    continue
+                links.append(TaskLink(parent_task_id=task_id, child_task_id=child.id, key=key))
+            session.add_all(links)
             await session.commit()
-            for child in created:
-                await session.refresh(child)
         return created
 
     async def fail_task(self, task_id: int, error: str, result: dict[str, object] | None = None) -> None:
@@ -439,18 +479,19 @@ class TasksRepoMixin(RepositoryMixinBase):
         if not tasks:
             return []
         async with self._task_insert_lock, self._session() as session:
+            active: _ActiveExclusive = {}
+            rows = [
+                await _resolve_task(session, task.type, task.payload or {}, task.priority, active) for task in tasks
+            ]
+            await session.flush()
             created: list[Task] = []
             seen: set[int] = set()
-            for task in tasks:
-                row = await _insert_or_reuse(session, task.type, task.payload or {}, task.priority)
-                assert row.id is not None
-                if row.id in seen:
+            for row in rows:
+                if row.id is None or row.id in seen:
                     continue
                 seen.add(row.id)
                 created.append(row)
             await session.commit()
-            for clone in created:
-                await session.refresh(clone)
             return created
 
     async def delete_task(self, task_id: int) -> bool:

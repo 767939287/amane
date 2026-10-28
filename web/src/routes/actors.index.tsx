@@ -102,6 +102,9 @@ export const Route = createFileRoute("/actors/")({
 /** 头像墙每批条数 - 与片库 grid 一样固定 chunk, 不暴露页大小控件. */
 const GRID_CHUNK = 30;
 
+/** 提交后等后端返回的时长上限; 超时只提示用户刷新任务列表, 不无限转圈. */
+const SCRAPE_ALL_TIMEOUT_MS = 30_000;
+
 function ActiveFilterChip({ label, onClear }: { label: string; onClear: () => void }) {
   return (
     <Group gap={4} wrap="nowrap">
@@ -176,6 +179,12 @@ function ActorsIndexPage() {
   const gridTotal = gridQuery.data?.pages[0]?.total ?? 0;
   const total = isList ? listTotal : gridTotal;
 
+  // 「全部刮削」始终覆盖全库演员, 与当前筛选无关; 确认框的数字只能取未筛选的 total.
+  const allActors = useQuery({
+    ...listActorsOptions({ query: { limit: 1 } }),
+    enabled: false,
+  });
+
   function handleSearchChange(v: string) {
     setSearchInput(v);
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -244,18 +253,28 @@ function ActorsIndexPage() {
   }
 
   async function handleScrapeAll() {
+    const { data: allActorsData } = await allActors.refetch();
     const ok = await confirm({
       title: t("actors.scrapeAll"),
-      message: t("actors.scrapeAllConfirm", { count: total }),
+      message: t("actors.scrapeAllConfirm", {
+        count: allActorsData?.total ?? total,
+      }),
       confirmLabel: t("actors.scrapeAll"),
       danger: false,
     });
     if (!ok) return;
     setScrapingAll(true);
+    const controller = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, SCRAPE_ALL_TIMEOUT_MS);
     try {
       const { data } = await batchSubmitTasks({
         body: { submissions: [{ type: "actor_scrape_all" }] },
         throwOnError: true,
+        signal: controller.signal,
       });
       notifications.show({
         message:
@@ -264,10 +283,13 @@ function ActorsIndexPage() {
       });
     } catch (err) {
       notifications.show({
-        message: extractErrorMessage(err, t("common:toast.operationFailed")),
-        color: "red",
+        message: timedOut
+          ? t("actors.scrapeAllTimeout")
+          : extractErrorMessage(err, t("common:toast.operationFailed")),
+        color: timedOut ? "yellow" : "red",
       });
     } finally {
+      clearTimeout(timer);
       setScrapingAll(false);
     }
   }

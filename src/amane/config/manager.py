@@ -664,6 +664,8 @@ class NetworkConfig(BaseModel):
 
 class WorkerConfig(BaseModel):
     concurrency: int = Field(default=10, ge=1, le=64)
+    scrape_concurrency: int = Field(default=0, ge=0, le=64)
+    """SCRAPE 与 ACTOR_SCRAPE **各自**同时运行的任务数上限; 0 = 不限制. 达到上限的类型留在队列里."""
     poll_interval: float = Field(default=2.0, ge=0.1, le=10, json_schema_extra={"x-hidden": True})
     shutdown_timeout: float = Field(default=0, ge=0, le=120.0, json_schema_extra={"x-hidden": True})
 

@@ -21,13 +21,13 @@ ORGANIZE 的入队来源只有三处: API / Agent 提交, retry 重跑, 库开�
 
 ORGANIZE 只读取范围内的 `MediaFile` 行: 缺省为该库全部索引, 显式 `path` 按前缀过滤, `media_file_ids` 为勾选快照 (含其它库的 id 则 422); 后两者同时给出则 422. 库根必须是已存在的目录, 否则失败; `media_file_ids` 未给出且 path 为子目录时该子目录也必须存在 — 避免网络盘掉线时把选中行当失效索引删掉. 无 Metadata 的行与命中文件黑名单 / 最小视频大小 / 预告片规则的行跳过落盘; 路径落在 `.amane_trash` 内的行删除索引. SCAN_INVALID 的 `path` 同样可限定子目录. 整理默认与预告片跳过正则见 [data-model.md](data-model.md).
 
-入队互斥在 `create_task`: queued / running 的 ACTOR_SCRAPE 按 `payload.actor_id` 复用已有行; ORGANIZE 与 DELETE 每次提交都新建行, 禁止复用, 同库的二者共用 `LibraryTaskLocks` 在执行期串行 (都在同一棵树上动文件). 不同库 / 不同演员仍并行. API、Agent、链式入队、retry 都经由 `create_task`, Worker 不按类型加锁; 终态之后允许再入队; 互斥不比较 payload 其它字段. 检查与插入须在 Repository 上串行化 (单进程), 机制见 [database.md](database.md)「写入事务边界」.
+入队互斥在 `create_task`: queued / running 的 ACTOR_SCRAPE 按 `payload.actor_id` 复用已有行; ORGANIZE 与 DELETE 每次提交都新建行, 禁止复用, 同库的二者共用 `LibraryTaskLocks` 在执行期串行 (都在同一棵树上动文件). 不同库 / 不同演员仍并行. API、Agent、链式入队、retry 都经由 `create_task`, Worker 不按类型加锁; 终态之后允许再入队; 互斥不比较 payload 其它字段. 检查与插入须在 Repository 上串行化 (单进程); 一次批量入队只在事务开头预取一次互斥键, 逐条入队不再回表, 机制见 [database.md](database.md)「写入事务边界」.
 
 ## 任务图 (TaskLink)
 
 后继任务只经 `TaskResult.followups` 进入完成事务:
 
-- **动态后继**: handler 在执行期间才确定后继数量与 payload, 经 `TaskResult.followups` 返回. REFRESH→SCRAPE、RESCRAPE→SCRAPE / ACTOR_SCRAPE、SCRAPE→ACTOR_SCRAPE、ACTOR_SCRAPE_ALL→ACTOR_SCRAPE 都是这一形态.
+- **动态后继**: handler 在执行期间才确定后继数量与 payload, 经 `TaskResult.followups` 返回. REFRESH→SCRAPE、RESCRAPE→SCRAPE / ACTOR_SCRAPE、SCRAPE→ACTOR_SCRAPE、ACTOR_SCRAPE_ALL→ACTOR_SCRAPE / ACTOR_SCRAPE_ALL 都是这一形态.
 - **统一完成事务**: worker 成功路径调用 `Repository.complete_task_with_followups` — 一个事务内完成父任务、创建子任务 (复用 `create_task` 的入队互斥)、写 `TaskLink` 边; 父完成与子创建原子, 失败路径不产生后继. 它与 `create_task` 同一把入队锁串行化, 因此两个父任务并发派生同一互斥键时只会复用同一行.
 - **`TaskLink`** 是父子边真值: `(parent_task_id, key)` 唯一, `key` 须在父节点内区分后继 (fan-out 带实体 id); 完成事务对同 key 只留第一条. 删除任务时清理其边, 不删除另一端任务.
 - **链聚合**: `tasks.root_task_id` 记录链根 (根指向自己), 一棵链一次 `list_tasks_by_root` 取回. 任务列表默认只显示链根, `child_count` / `child_status` 是直接后继的数量与状态分布, 折叠节点据此显示.
@@ -135,6 +135,8 @@ handler 之间复用的阶段逻辑, 不是一条可跳步的总管线:
 
 并发上限 `worker.concurrency`. 上限是经验值: curl_cffi 浏览器指纹 + 多站点并发下过高易触发反爬.
 
+`worker.scrape_concurrency` 另设 SCRAPE / ACTOR_SCRAPE **各自**的同时运行上限 (0 = 不限制). 限制落在认领阶段: 已达上限的类型本次不认领, 任务留在 QUEUED, 既不占 `worker.concurrency` 的槽, 也不阻塞其它类型; 判定与认领同在 Repository 的认领锁内完成 (RUNNING 只由认领写入). 每次认领现读 HotSettings, PATCH 后下一轮认领生效; 缩到 1 也不会取消已认领的任务.
+
 ### 主循环自愈
 
 认领循环由 `AsyncWorker._supervise` 守护: 未捕获异常 (典型是写锁等待超时) 记录 error 后退避重启, 退避上限 60s, `retire()` 打断退避且不再拉起. 崩溃只在退役与关闭路径经 `wait_stopped` 才能观察到, 运行期没有其它读取点, 不重启即等于调度器永久停止认领. 重启不重放崩溃瞬间的认领, 已提交未登记的行与其它 RUNNING 行一样等下次清扫.
@@ -179,7 +181,7 @@ handler 之间复用的阶段逻辑, 不是一条可跳步的总管线:
 
 **链式自动触发**: `actor_scraping.auto_scrape` 开启 (默认) 时, 影片 SCRAPE 成功后在 `ScrapeHandler` 末尾按清洗解析后的 `meta.actors` 查询 Actor 实体, **`Actor.raw` 非空 (已刮过) 则跳过**, 其余以 **`priority=-1`** 入队 (不抢占影片任务优先级); 同 `actor_id` 已有 queued / running 时复用入队互斥. 链式块内异常只记录 warning, 不阻断刮削主流程.
 
-`ACTOR_SCRAPE_ALL` 是「全部刮削」的入口, 按 `Repository.list_actor_ids` 为每个演员描述一个 `ACTOR_SCRAPE` 后继, 不区分是否已刮过、不访问资料来源; 优先级取默认 0. 与 RESCRAPE 的差别在选取口径: 前者不限条数, 后者按 `updated_at` 滚动取 `limit` 条.
+`ACTOR_SCRAPE_ALL` 是「全部刮削」的入口: 按 id 升序游标每次为 `ACTOR_SCRAPE_BATCH` 个演员描述一个 `ACTOR_SCRAPE` 后继 (优先级 -1), 余下部分以携带 `after_id` / `done` 的同类任务续跑 — 单事务的后继条数与演员总数无关, 每个批次节点各自上报 `done / total` 进度. 不区分是否已刮过、不访问资料来源, 也不受演员列表筛选影响. 与 RESCRAPE 的差别在选取口径: 前者覆盖全库, 后者按 `updated_at` 滚动取 `limit` 条.
 
 ## CLEANUP 悬空引用回收
 

@@ -22,9 +22,10 @@ def chunks[T](items: list[T]) -> Iterator[list[T]]:
 
 
 class RepositoryMixinBase:
-    """子类须提供 ``_session()``. 任务 mixin 还依赖 ``_task_insert_lock`` 串行化入队互斥."""
+    """子类须提供 ``_session()``. 任务 mixin 还依赖两把锁: 入队互斥与认领判定."""
 
     _task_insert_lock: asyncio.Lock
+    _claim_lock: asyncio.Lock
 
     def _session(self) -> AsyncSession:
         raise NotImplementedError

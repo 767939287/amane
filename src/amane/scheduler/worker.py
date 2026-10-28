@@ -9,6 +9,7 @@ import structlog
 from pydantic import BaseModel
 
 from ..config import HotSettings
+from ..db.models import TaskType
 from ..events import EventType
 from ..handlers.protocol import TaskResult
 from ..observability import Recorder
@@ -17,7 +18,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
     from pathlib import Path
 
-    from ..db.models import Task, TaskType
+    from ..db.models import Task
     from ..db.repository import Repository
     from ..events import EventBus
     from ..handlers.protocol import TaskHandler
@@ -25,6 +26,9 @@ if TYPE_CHECKING:
 logger = structlog.get_logger()
 
 CANCEL_ERROR = "已由用户取消"
+
+# 刮削组: 认领闸门按类型分别计数, 影片与演员互不阻塞.
+SCRAPE_GROUPS: tuple[TaskType, ...] = (TaskType.SCRAPE, TaskType.ACTOR_SCRAPE)
 
 _DEFAULT_SHUTDOWN_TIMEOUT = 0
 # 关闭时等待主循环 (含尚未结算的认领) 退出的兜底阈值; 正常路径只等它自己退出.
@@ -185,7 +189,7 @@ class AsyncWorker:
         while self._is_main:
             # 未暂停且有空闲容量时认领
             if not self._paused and self._semaphore._value > 0:
-                task = await self._repo.claim_next_task()
+                task = await self._repo.claim_next_task(limits=self._scrape_limits())
                 if task is not None:
                     task_id = task.id
                     assert task_id is not None
@@ -199,6 +203,13 @@ class AsyncWorker:
                 await asyncio.wait_for(self._stop_signal.wait(), self._poll_interval)
 
         logger.info("worker stopped")
+
+    def _scrape_limits(self) -> dict[TaskType, int]:
+        """每次认领现读配置, 因此 PATCH 后下一轮认领即生效."""
+        if self._get_hot is None:
+            return {}
+        cap = self._get_hot().worker.scrape_concurrency
+        return dict.fromkeys(SCRAPE_GROUPS, cap) if cap > 0 else {}
 
     async def cancel_task(self, task_id: int) -> bool:
         asyncio_task = self._active_tasks.get(task_id)

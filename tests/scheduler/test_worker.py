@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy.exc import OperationalError
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from amane.config import HotSettings, WorkerConfig
 from amane.db.models import Task, TaskStatus, TaskType
 from amane.handlers.protocol import FollowupTask, TaskHandler, TaskResult
 from amane.scheduler import worker as worker_module
@@ -94,7 +95,7 @@ async def test_worker_retire_drain_stops_claiming(repo: Repository) -> None:
     orig_claim = repo.claim_next_task
     blocked = True
 
-    async def blocked_claim():
+    async def blocked_claim(**_kwargs: object):
         nonlocal blocked
         if blocked:
             blocked = False
@@ -181,7 +182,7 @@ async def test_worker_restarts_main_loop_after_crash(repo: Repository, monkeypat
     crashes = 0
     real_claim = repo.claim_next_task
 
-    async def flaky_claim() -> Task | None:
+    async def flaky_claim(**_kwargs: object) -> Task | None:
         nonlocal crashes
         crashes += 1
         if crashes <= 2:
@@ -209,7 +210,7 @@ async def test_worker_retire_interrupts_restart_backoff(repo: Repository, monkey
     crashed = asyncio.Event()
     claims = 0
 
-    async def always_crash() -> Task | None:
+    async def always_crash(**_kwargs: object) -> Task | None:
         nonlocal claims
         claims += 1
         crashed.set()
@@ -637,3 +638,49 @@ async def test_worker_no_followups_on_failure(repo: Repository) -> None:
 
     assert await repo.list_task_links(parent_task_id=t.id) == []
     assert await repo.list_tasks_by_root(t.id) == []
+
+
+class _CountingHandler(TaskHandler):
+    """记录同时在跑的最大任务数."""
+
+    def __init__(self, delay: float) -> None:
+        super().__init__(payload_t=dict, result_t=dict)
+        self._delay = delay
+        self.active = 0
+        self.max_active = 0
+
+    async def handle(self, payload: dict):
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        await asyncio.sleep(self._delay)
+        self.active -= 1
+        return TaskResult(success=True, result={})
+
+
+@pytest.mark.parametrize(
+    ("scrape_concurrency", "expected_max"),
+    [
+        pytest.param(0, 3, id="unlimited"),
+        pytest.param(1, 1, id="serial"),
+    ],
+)
+@pytest.mark.asyncio(loop_scope="function")
+async def test_worker_scrape_concurrency_limit(repo: Repository, scrape_concurrency: int, expected_max: int) -> None:
+    """刮削并发上限在认领阶段生效: 排队中的同类任务不占并发槽, 也不执行."""
+    hot = HotSettings(worker=WorkerConfig(scrape_concurrency=scrape_concurrency))
+    handler = _CountingHandler(delay=0.05)
+    worker = AsyncWorker(
+        repo=repo,
+        handlers={TaskType.SCRAPE: handler},
+        concurrency=3,
+        poll_interval=0.02,
+        get_hot=lambda: hot,
+    )
+    for i in range(3):
+        await repo.create_task(TaskType.SCRAPE, payload={"number": f"LIMIT-{i}"})
+
+    worker.start()
+    await recv(worker, 3)
+    await stop_worker(worker)
+
+    assert handler.max_active == expected_max
