@@ -837,6 +837,10 @@ export type BrowserConfig = {
      * Trusted Hosts
      */
     trusted_hosts?: Array<string>;
+    /**
+     * Solver Hosts
+     */
+    solver_hosts?: Array<string>;
 };
 
 /**
@@ -4517,6 +4521,10 @@ export type SiteConfig = {
      * 词条语言优先级, 依序取第一个有正文的词条
      */
     languages?: Array<'zh' | 'ja' | 'en'>;
+    /**
+     * Overview Max Chars
+     */
+    overview_max_chars?: number;
 };
 
 /**

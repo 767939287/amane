@@ -317,6 +317,11 @@ class SiteConfig(BaseModel):
     只决定取哪一版维基词条正文, 不减少 Wikidata 的检索语言; 留空则回退默认优先级; 只有 WikipediaActorCrawler 读取.
     """
 
+    overview_max_chars: int = Field(
+        default=1500, ge=200, le=20000, json_schema_extra={"x-visible-keys": _SITES_WITH_LANGUAGES}
+    )
+    """维基词条简介的字数上限; 段落级拼装, 放不下的那一段截到句末. 只有 WikipediaActorCrawler 读取."""
+
     @field_validator("languages")
     @classmethod
     def _supported_languages(cls, v: list[str], info: ValidationInfo) -> list[str]:
@@ -607,6 +612,23 @@ def _require_browser_engine(
     return backend
 
 
+def _normalize_hosts(v: Any) -> Any:
+    """去掉协议与路径, 转小写并去重; 通配前缀 ``*.`` 保留."""
+    if not isinstance(v, list):
+        return v
+    hosts: list[str] = []
+    for item in v:
+        if not isinstance(item, str):
+            continue
+        host = item.strip().lower()
+        if "://" in host:
+            host = host.split("://", 1)[1]
+        host = host.split("/", 1)[0].strip()
+        if host and host not in hosts:
+            hosts.append(host)
+    return hosts
+
+
 class BrowserConfig(BaseModel):
     bsk_path: str | None = Field(
         default=None,
@@ -624,6 +646,11 @@ class BrowserConfig(BaseModel):
     """只作用于 solver 请求的上游代理; 空值表示直连, 与 ``network.proxy`` 互不影响."""
     trusted_hosts: list[str] = Field(default_factory=list)
     """solver 返回的最终地址必须落在这些 host 内, 支持 ``*.example.com``; 空列表关闭校验."""
+    solver_hosts: list[str] = Field(default_factory=list)
+    """始终经 solver 渲染的域名, 用于内置站点之外的网站 (含插件来源); 支持 ``*.example.com``.
+
+    只在解析出的后端为 ``solver`` 时生效; 站点配置里 ``use_browser=off`` 的站点仍直连.
+    """
 
     @model_validator(mode="after")
     def _engine_available(self) -> BrowserConfig:
@@ -637,23 +664,10 @@ class BrowserConfig(BaseModel):
             return v.strip() or None
         return v
 
-    @field_validator("trusted_hosts", mode="before")
+    @field_validator("trusted_hosts", "solver_hosts", mode="before")
     @classmethod
     def _normalize_trusted_hosts(cls, v: Any) -> Any:
-        """去掉协议与路径, 转小写并去重; 通配前缀 ``*.`` 保留."""
-        if not isinstance(v, list):
-            return v
-        hosts: list[str] = []
-        for item in v:
-            if not isinstance(item, str):
-                continue
-            host = item.strip().lower()
-            if "://" in host:
-                host = host.split("://", 1)[1]
-            host = host.split("/", 1)[0].strip()
-            if host and host not in hosts:
-                hosts.append(host)
-        return hosts
+        return _normalize_hosts(v)
 
 
 class NetworkConfig(BaseModel):

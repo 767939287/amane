@@ -530,6 +530,10 @@
                 "en": "英文"
               }
             }
+          },
+          "overview_max_chars": {
+            "label": "简介字数上限",
+            "description": "维基词条简介的最大字数, 超出部分截到句末"
           }
         }
       },
@@ -665,6 +669,10 @@
         "trusted_hosts": {
           "label": "落地域名白名单",
           "description": "Solver 返回的最终地址必须落在这些域名内, 支持 *.example.com; 留空不校验"
+        },
+        "solver_hosts": {
+          "label": "Solver 自定义网站",
+          "description": "这些域名始终经 Solver 渲染, 用于内置站点之外的网站或插件来源, 支持 *.example.com; 留空不生效"
         }
       },
       "chunked_threshold": {

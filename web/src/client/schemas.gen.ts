@@ -1474,6 +1474,13 @@ export const BrowserConfigSchema = {
             },
             type: 'array',
             title: 'Trusted Hosts'
+        },
+        solver_hosts: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Solver Hosts'
         }
     },
     type: 'object',
@@ -3298,6 +3305,7 @@ export const HotSettingsSchema = {
                             'en'
                         ],
                         official_routes: {},
+                        overview_max_chars: 1500,
                         rate_limit: 2,
                         use_browser: 'auto',
                         use_proxy: true
@@ -3310,6 +3318,7 @@ export const HotSettingsSchema = {
                             'en'
                         ],
                         official_routes: {},
+                        overview_max_chars: 1500,
                         rate_limit: 2,
                         use_browser: 'auto',
                         use_proxy: true
@@ -3322,6 +3331,7 @@ export const HotSettingsSchema = {
                             'en'
                         ],
                         official_routes: {},
+                        overview_max_chars: 1500,
                         rate_limit: 2,
                         use_browser: 'auto',
                         use_proxy: true
@@ -3334,6 +3344,7 @@ export const HotSettingsSchema = {
                             'en'
                         ],
                         official_routes: {},
+                        overview_max_chars: 1500,
                         rate_limit: 2,
                         use_browser: 'auto',
                         use_proxy: true
@@ -3346,6 +3357,7 @@ export const HotSettingsSchema = {
                             'en'
                         ],
                         official_routes: {},
+                        overview_max_chars: 1500,
                         rate_limit: 2,
                         use_browser: 'auto',
                         use_proxy: true
@@ -3358,6 +3370,7 @@ export const HotSettingsSchema = {
                             'en'
                         ],
                         official_routes: {},
+                        overview_max_chars: 1500,
                         rate_limit: 2,
                         use_browser: 'auto',
                         use_proxy: true
@@ -3370,6 +3383,7 @@ export const HotSettingsSchema = {
                             'en'
                         ],
                         official_routes: {},
+                        overview_max_chars: 1500,
                         rate_limit: 2,
                         use_browser: 'auto',
                         use_proxy: true
@@ -3382,6 +3396,7 @@ export const HotSettingsSchema = {
                             'en'
                         ],
                         official_routes: {},
+                        overview_max_chars: 1500,
                         rate_limit: 2,
                         use_browser: 'auto',
                         use_proxy: true
@@ -3394,6 +3409,7 @@ export const HotSettingsSchema = {
                             'en'
                         ],
                         official_routes: {},
+                        overview_max_chars: 1500,
                         rate_limit: 2,
                         use_browser: 'auto',
                         use_proxy: true
@@ -3406,6 +3422,7 @@ export const HotSettingsSchema = {
                             'en'
                         ],
                         official_routes: {},
+                        overview_max_chars: 1500,
                         rate_limit: 2,
                         use_browser: 'auto',
                         use_proxy: true
@@ -3418,6 +3435,7 @@ export const HotSettingsSchema = {
                             'en'
                         ],
                         official_routes: {},
+                        overview_max_chars: 1500,
                         rate_limit: 2,
                         use_browser: 'auto',
                         use_proxy: true
@@ -3430,6 +3448,7 @@ export const HotSettingsSchema = {
                             'en'
                         ],
                         official_routes: {},
+                        overview_max_chars: 1500,
                         rate_limit: 2,
                         use_browser: 'auto',
                         use_proxy: true
@@ -3442,6 +3461,7 @@ export const HotSettingsSchema = {
                             'en'
                         ],
                         official_routes: {},
+                        overview_max_chars: 1500,
                         rate_limit: 2,
                         use_browser: 'auto',
                         use_proxy: true
@@ -3454,6 +3474,7 @@ export const HotSettingsSchema = {
                             'en'
                         ],
                         official_routes: {},
+                        overview_max_chars: 1500,
                         rate_limit: 2,
                         use_browser: 'auto',
                         use_proxy: true
@@ -3466,6 +3487,7 @@ export const HotSettingsSchema = {
                             'en'
                         ],
                         official_routes: {},
+                        overview_max_chars: 1500,
                         rate_limit: 2,
                         use_browser: 'auto',
                         use_proxy: true
@@ -3478,6 +3500,7 @@ export const HotSettingsSchema = {
                             'en'
                         ],
                         official_routes: {},
+                        overview_max_chars: 1500,
                         rate_limit: 2,
                         use_browser: 'auto',
                         use_proxy: true
@@ -3490,6 +3513,7 @@ export const HotSettingsSchema = {
                             'en'
                         ],
                         official_routes: {},
+                        overview_max_chars: 1500,
                         rate_limit: 2,
                         use_browser: 'auto',
                         use_proxy: true
@@ -3502,6 +3526,7 @@ export const HotSettingsSchema = {
                             'en'
                         ],
                         official_routes: {},
+                        overview_max_chars: 1500,
                         rate_limit: 2,
                         use_browser: 'auto',
                         use_proxy: true
@@ -3514,6 +3539,7 @@ export const HotSettingsSchema = {
                             'en'
                         ],
                         official_routes: {},
+                        overview_max_chars: 1500,
                         rate_limit: 2,
                         use_browser: 'auto',
                         use_proxy: true
@@ -3526,6 +3552,7 @@ export const HotSettingsSchema = {
                             'en'
                         ],
                         official_routes: {},
+                        overview_max_chars: 1500,
                         rate_limit: 2,
                         use_browser: 'auto',
                         use_proxy: true
@@ -3538,6 +3565,7 @@ export const HotSettingsSchema = {
                             'en'
                         ],
                         official_routes: {},
+                        overview_max_chars: 1500,
                         rate_limit: 2,
                         use_browser: 'auto',
                         use_proxy: true
@@ -3550,6 +3578,7 @@ export const HotSettingsSchema = {
                             'en'
                         ],
                         official_routes: {},
+                        overview_max_chars: 1500,
                         rate_limit: 2,
                         use_browser: 'auto',
                         use_proxy: true
@@ -3562,6 +3591,7 @@ export const HotSettingsSchema = {
                             'en'
                         ],
                         official_routes: {},
+                        overview_max_chars: 1500,
                         rate_limit: 2,
                         use_browser: 'auto',
                         use_proxy: true
@@ -3574,6 +3604,7 @@ export const HotSettingsSchema = {
                             'en'
                         ],
                         official_routes: {},
+                        overview_max_chars: 1500,
                         rate_limit: 2,
                         use_browser: 'auto',
                         use_proxy: true
@@ -3586,6 +3617,7 @@ export const HotSettingsSchema = {
                             'en'
                         ],
                         official_routes: {},
+                        overview_max_chars: 1500,
                         rate_limit: 2,
                         use_browser: 'auto',
                         use_proxy: true
@@ -3598,6 +3630,7 @@ export const HotSettingsSchema = {
                             'en'
                         ],
                         official_routes: {},
+                        overview_max_chars: 1500,
                         rate_limit: 2,
                         use_browser: 'auto',
                         use_proxy: true
@@ -3610,6 +3643,7 @@ export const HotSettingsSchema = {
                             'en'
                         ],
                         official_routes: {},
+                        overview_max_chars: 1500,
                         rate_limit: 2,
                         use_browser: 'auto',
                         use_proxy: true
@@ -3675,6 +3709,7 @@ export const HotSettingsSchema = {
                 max_clients: 50,
                 browser: {
                     backend: 'off',
+                    solver_hosts: [],
                     solver_protocol: 'flaresolverr',
                     solver_url: 'http://127.0.0.1:8191',
                     timeout: 30000,
@@ -8698,6 +8733,16 @@ export const SiteConfigSchema = {
             title: 'Languages',
             description: '词条语言优先级, 依序取第一个有正文的词条',
             'x-ordered': true,
+            'x-visible-keys': [
+                'wikipedia'
+            ]
+        },
+        overview_max_chars: {
+            type: 'integer',
+            maximum: 20000,
+            minimum: 200,
+            title: 'Overview Max Chars',
+            default: 1500,
             'x-visible-keys': [
                 'wikipedia'
             ]

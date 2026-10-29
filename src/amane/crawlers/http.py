@@ -6,18 +6,19 @@
 
 from __future__ import annotations
 
+from fnmatch import fnmatchcase
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
     from ..config import SiteConfig
-    from ..enums import BrowserBackendName
     from ..net.browser import BrowserClient
     from ..net.http import WebClient
 
-from ..enums import BrowserMode
+from ..enums import BrowserBackendName, BrowserMode
 from ..net.connectivity import ConnectivityOutcome, probe_get
 from ..net.errors import FailureKind, FailureReason, RequestError, RequestFailure, SourceError, classify_block
 
@@ -35,6 +36,7 @@ class HttpClient:
         browser_backend: BrowserBackendName | None = None,
         browser_timeout: float = 30000.0,
         browser_required: set[str] | None = None,
+        solver_hosts: Sequence[str] = (),
     ):
         self._web = web
         self._browser = browser
@@ -44,6 +46,7 @@ class HttpClient:
         self._browser_timeout = browser_timeout
         # auto 已切到浏览器的 scope; 同一来源的派生视图共享, 避免每个视图重新撞盾.
         self._browser_required = browser_required if browser_required is not None else set()
+        self._solver_hosts = tuple(host.lower() for host in solver_hosts)
 
     @property
     def web_client(self) -> WebClient:
@@ -62,6 +65,7 @@ class HttpClient:
             browser_backend=config.browser_backend,
             browser_timeout=self._browser_timeout,
             browser_required=self._browser_required,
+            solver_hosts=self._solver_hosts,
         )
 
     async def get_text(
@@ -178,9 +182,22 @@ class HttpClient:
         return self._source or urlparse(url).hostname or url
 
     def _should_render(self, url: str) -> bool:
+        if self._browser_mode is BrowserMode.OFF:
+            return False
+        if self._matches_solver_host(url):
+            return True
         if self._browser_mode is BrowserMode.ALWAYS:
             return True
         return self._browser_mode is BrowserMode.AUTO and self._scope(url) in self._browser_required
+
+    def _matches_solver_host(self, url: str) -> bool:
+        """域名在 ``network.browser.solver_hosts`` 内时始终渲染; 内置站点之外的网站靠它走 solver."""
+        if not self._solver_hosts or self._browser is None:
+            return False
+        if self._browser.resolve(self._browser_backend) is not BrowserBackendName.SOLVER:
+            return False
+        host = (urlparse(url).hostname or "").lower()
+        return bool(host) and any(fnmatchcase(host, pattern) for pattern in self._solver_hosts)
 
     def _browser_available(self) -> bool:
         return self._browser is not None and self._browser.resolve(self._browser_backend) is not None

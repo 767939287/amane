@@ -151,7 +151,12 @@ def build_network_stack(
     else:
         browser.rebind_web_client(web_client)
     _warn_disabled_browser_sources(hot, browser)
-    http_client = HttpClient(web=web_client, browser=browser, browser_timeout=hot.network.browser.timeout)
+    http_client = HttpClient(
+        web=web_client,
+        browser=browser,
+        browser_timeout=hot.network.browser.timeout,
+        solver_hosts=hot.network.browser.solver_hosts,
+    )
     factory = CrawlerFactory(
         http_client,
         site_configs=hot.scraping.site_config,

@@ -37,6 +37,29 @@ def client(mock_web, mock_browser):
     return HttpClient(web=mock_web, browser=mock_browser, browser_mode=BrowserMode.OFF)
 
 
+@pytest.mark.parametrize(
+    ("hosts", "url", "backend", "mode", "rendered"),
+    [
+        (["*.example.com"], "https://a.example.com/p", BrowserBackendName.SOLVER, BrowserMode.AUTO, True),
+        (["example.com"], "https://example.com/p", BrowserBackendName.SOLVER, BrowserMode.AUTO, True),
+        (["other.example"], "https://example.com/p", BrowserBackendName.SOLVER, BrowserMode.AUTO, False),
+        (["example.com"], "https://example.com/p", BrowserBackendName.CAMOUFOX, BrowserMode.AUTO, False),
+        (["example.com"], "https://example.com/p", BrowserBackendName.SOLVER, BrowserMode.OFF, False),
+    ],
+    ids=["wildcard", "exact", "miss", "local-backend", "site-disabled"],
+)
+@pytest.mark.asyncio
+async def test_solver_hosts_force_render(hosts, url, backend, mode, rendered, mock_web):
+    """内置站点之外的域名靠 solver_hosts 直接走 solver; 非 solver 后端与显式直连不生效."""
+    browser = AsyncMock()
+    browser.resolve = MagicMock(return_value=backend)
+    browser.get_page.return_value = ("<html><body>Rendered</body></html>", None)
+    mock_web.get_text.return_value = "<html><body>Plain</body></html>"
+    client = HttpClient(web=mock_web, browser=browser, browser_mode=mode, solver_hosts=hosts)
+
+    assert (await client.get_html(url) == "<html><body>Rendered</body></html>") is rendered
+
+
 @pytest.mark.asyncio
 async def test_get_html_passes_through_normal_page(client, mock_web):
     mock_web.get_text.return_value = "<html><body>Normal Page</body></html>"

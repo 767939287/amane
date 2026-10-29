@@ -260,6 +260,11 @@ class TestBrowserConfigValidation:
         cfg = BrowserConfig(trusted_hosts=[" HTTPS://A.Example/path ", "*.B.example", "a.example", ""])
         assert cfg.trusted_hosts == ["a.example", "*.b.example"]
 
+    def test_solver_hosts_normalized(self):
+        """用户可按任意域名填写, 粘贴整条 URL 也接受."""
+        cfg = BrowserConfig(solver_hosts=[" HTTPS://A.Example/path ", "*.B.example", "a.example", ""])
+        assert cfg.solver_hosts == ["a.example", "*.b.example"]
+
     def test_blank_bypass_proxy_is_none(self):
         assert BrowserConfig(bypass_proxy="  ").bypass_proxy is None
 

@@ -293,6 +293,23 @@ async def test_entry_language_default_prefers_zh() -> None:
     assert fetched == [_ZH_URL]
 
 
+@pytest.mark.parametrize(("limit", "expected_len"), [(300, 300), (2000, 2000)], ids=["narrow", "wide"])
+@pytest.mark.asyncio
+async def test_overview_limit_from_site_config(limit: int, expected_len: int) -> None:
+    """简介上限取站点配置, 不再固定 1500 字; 长正文仍截到句末."""
+    long_page = _page(f"<h2>人物</h2><p>{'长句第一句。' * 800}</p>")
+    crawler, _ = _crawler(
+        _entity(labels={"ja": _NAME}, sitelinks=_SITELINKS),
+        {"ja.wikipedia.org": long_page},
+        config=SiteConfig(languages=["ja"], overview_max_chars=limit),
+    )
+    meta = await crawler.fetch(_NAME)
+    assert meta is not None
+    assert meta.overview is not None
+    assert len(meta.overview) <= expected_len
+    assert meta.overview.endswith("…")
+
+
 @pytest.mark.asyncio
 async def test_entry_language_config_overrides_default() -> None:
     crawler, fetched = _crawler(

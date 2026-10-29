@@ -279,7 +279,7 @@ class WikipediaActorCrawler(ActorCrawler):
                 continue
             if not html:
                 continue
-            page = _parse_wiki_page(url, html)
+            page = _parse_wiki_page(url, html, _overview_limit(self.config))
             if page.overview:
                 return page
             if fallback is None:
@@ -572,6 +572,11 @@ def _entry_languages(config: SiteConfig | None) -> tuple[str, ...]:
     return WIKI_LANGUAGES if config is None else tuple(config.languages)
 
 
+def _overview_limit(config: SiteConfig | None) -> int:
+    """未注入 SiteConfig 的构造 (测试) 取默认上限."""
+    return _OVERVIEW_MAX_CHARS if config is None else config.overview_max_chars
+
+
 def _wiki_url(sitelinks: dict[str, Any], lang: str) -> str | None:
     link = sitelinks.get(f"{lang}wiki")
     title = link.get("title") if isinstance(link, dict) else None
@@ -600,9 +605,9 @@ class _WikiPage(NamedTuple):
     figure: _Figure
 
 
-def _parse_wiki_page(url: str, html_text: str) -> _WikiPage:
+def _parse_wiki_page(url: str, html_text: str, overview_max_chars: int = _OVERVIEW_MAX_CHARS) -> _WikiPage:
     html = Selector(text=html_text)
-    overview = _clip_blocks(_overview_blocks(html)) or None
+    overview = _clip_blocks(_overview_blocks(html), overview_max_chars) or None
     birthplace, birthday, figure = _parse_infobox(html)
     return _WikiPage(url=url, overview=overview, birthplace=birthplace, birthday=birthday, figure=figure)
 
@@ -678,11 +683,11 @@ def _has_ancestor(node: Any, tags: frozenset[str]) -> bool:
     return False
 
 
-def _clip_blocks(blocks: list[str]) -> str:
+def _clip_blocks(blocks: list[str], limit: int) -> str:
     out = ""
     for block in blocks:
         sep = _PARAGRAPH_SEP if out else ""
-        room = _OVERVIEW_MAX_CHARS - len(out) - len(sep)
+        room = limit - len(out) - len(sep)
         if len(block) <= room:
             out = f"{out}{sep}{block}"
             continue

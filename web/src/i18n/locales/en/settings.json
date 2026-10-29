@@ -530,6 +530,10 @@
                 "en": "English"
               }
             }
+          },
+          "overview_max_chars": {
+            "label": "Overview Length Limit",
+            "description": "Max characters of the Wikipedia overview; the tail is cut at a sentence end"
           }
         }
       },
@@ -665,6 +669,10 @@
         "trusted_hosts": {
           "label": "Trusted Landing Hosts",
           "description": "The final URL returned by the solver must match one of these hosts; *.example.com is supported. Empty disables the check"
+        },
+        "solver_hosts": {
+          "label": "Solver Custom Sites",
+          "description": "These hosts are always rendered through the solver, for sites outside the built-in list and for plugin sources; *.example.com is supported. Empty disables it"
         }
       },
       "chunked_threshold": {
