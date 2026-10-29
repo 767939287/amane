@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import mimetypes
 import uuid
 from typing import TYPE_CHECKING, Any
@@ -130,8 +131,12 @@ class MediaServerClient:
         await self._request("POST", f"{self.root}/Items/{quote(person.id, safe='')}", json=dto)
 
     async def upload_primary_image(self, person_id: str, path: Path) -> None:
-        """上传主图; 文件读取放线程, 避免大图阻塞事件循环."""
-        payload = await asyncio.to_thread(path.read_bytes)
+        """上传主图; 文件读取与 base64 编码放线程, 避免大图阻塞事件循环.
+
+        服务端把请求体当 base64 解 (Jellyfin ``ImageController.SetItemImage`` 经
+        ``GetFromBase64Stream`` 读 body, Emby 同源实现), 直接发原始字节会写出损坏的图片.
+        """
+        payload = await asyncio.to_thread(lambda: base64.b64encode(path.read_bytes()).decode("ascii"))
         mime = mimetypes.guess_type(str(path))[0] or "image/jpeg"
         await self._request(
             "POST",

@@ -18,7 +18,9 @@
 - 更新以人物列表返回的原始 DTO 为底稿整体回传 (`POST /Items/{id}`), 只覆盖本次要写的字段: 服务端其它字段与原图标记不得丢.
 - `overview_mode=append_original` 把服务器原简介当作「经历」追加在本地简介之后; 服务器简介已以本地简介开头时原样保留, 重复回写不叠加.
 - Tags 与 ProviderIds 取并集 (服务器现有值在前, 本地覆盖同名键); 结果与服务器现值相同时不发请求.
-- 头像取 `image_urls[0]` 的 Resource 本地文件, 缺文件时跳过, 不阻断其余字段.
+- 头像取 `image_urls[0]` 的 Resource 本地文件, 缺文件时跳过, 不阻断其余字段. 上传走
+ `POST /Items/{id}/Images/Primary`, 请求体是图片的 base64 而不是原始字节: 服务端经
+ `GetFromBase64Stream` 解 body, 发原始字节会写出损坏的图片.
 - 写完调用 `/Items/{id}/Refresh` 且 `MetadataRefreshMode=None`, 避免提供方把刚写的字段覆盖回去.
 - 单个演员失败只计数, 不中止整批.
 

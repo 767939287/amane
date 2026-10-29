@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
@@ -187,7 +188,8 @@ async def test_update_person_omits_unset_fields() -> None:
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_upload_primary_image_uses_file_mime(tmp_path: Path) -> None:
+async def test_upload_primary_image_sends_base64_body(tmp_path: Path) -> None:
+    """服务端按 base64 解请求体; 发原始字节会写出损坏的图片."""
     image = tmp_path / "avatar.png"
     image.write_bytes(b"png-bytes")
     web = _FakeWebClient()
@@ -196,7 +198,7 @@ async def test_upload_primary_image_uses_file_mime(tmp_path: Path) -> None:
 
     method, url, kwargs = web.calls[0]
     assert (method, url) == ("POST", "http://nas:8096/emby/Items/7/Images/Primary")
-    assert kwargs["data"] == b"png-bytes"
+    assert kwargs["data"] == base64.b64encode(b"png-bytes").decode("ascii")
     assert kwargs["headers"]["Content-Type"] == "image/png"
 
 
