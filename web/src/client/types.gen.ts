@@ -766,14 +766,59 @@ export type BodyInstallPlugin = {
 };
 
 /**
+ * BrowserBackendItemResponse
+ *
+ * 一个后端的可用性.
+ *
+ * ``detail`` 是环境抛出的原文 (缺模块、缺 CLI、浏览器未连接、solver 应答错误), 界面原样展示;
+ * ``version`` 目前只有 bsk 有 (daemon 版本).
+ */
+export type BrowserBackendItemResponse = {
+    backend: BrowserBackendName;
+    /**
+     * Available
+     */
+    available: boolean;
+    /**
+     * Detail
+     */
+    detail?: string | null;
+    /**
+     * Version
+     */
+    version?: string | null;
+    /**
+     * Browsers
+     */
+    browsers?: Array<BrowserInstanceResponse>;
+};
+
+/**
  * BrowserBackendName
  */
-export type BrowserBackendName = 'off' | 'patchright' | 'camoufox' | 'solver';
+export type BrowserBackendName = 'off' | 'patchright' | 'camoufox' | 'bsk' | 'solver';
+
+/**
+ * BrowserBackendReportResponse
+ *
+ * ``selected`` 是当前生效的后端, 供界面标出「已选但不可用」这一种组合.
+ */
+export type BrowserBackendReportResponse = {
+    selected: BrowserBackendName;
+    /**
+     * Items
+     */
+    items?: Array<BrowserBackendItemResponse>;
+};
 
 /**
  * BrowserConfig
  */
 export type BrowserConfig = {
+    /**
+     * Bsk Path
+     */
+    bsk_path?: string | null;
     backend?: BrowserBackendName;
     /**
      * Timeout
@@ -792,6 +837,30 @@ export type BrowserConfig = {
      * Trusted Hosts
      */
     trusted_hosts?: Array<string>;
+};
+
+/**
+ * BrowserInstanceResponse
+ *
+ * bsk 已连接的浏览器实例; 只用于展示, 选择实例属于后续能力.
+ */
+export type BrowserInstanceResponse = {
+    /**
+     * Instance Id
+     */
+    instance_id: string;
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Extension Version
+     */
+    extension_version?: string | null;
+    /**
+     * Unresponsive
+     */
+    unresponsive?: boolean;
 };
 
 /**
@@ -6366,6 +6435,22 @@ export type MergeMetadataResponses = {
 };
 
 export type MergeMetadataResponse = MergeMetadataResponses[keyof MergeMetadataResponses];
+
+export type BrowserBackendsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/network/browser';
+};
+
+export type BrowserBackendsResponses = {
+    /**
+     * Successful Response
+     */
+    200: BrowserBackendReportResponse;
+};
+
+export type BrowserBackendsResponse = BrowserBackendsResponses[keyof BrowserBackendsResponses];
 
 export type CheckConnectivityData = {
     /**

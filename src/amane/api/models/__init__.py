@@ -72,7 +72,14 @@ from .metadata import (
     MetadataUserTagsRequest,
     PartialMetadata,
 )
-from .network import ConnectivityCheckRequest, ConnectivityItemResponse, ConnectivityReportResponse
+from .network import (
+    BrowserBackendItemResponse,
+    BrowserBackendReportResponse,
+    BrowserInstanceResponse,
+    ConnectivityCheckRequest,
+    ConnectivityItemResponse,
+    ConnectivityReportResponse,
+)
 from .playback import (
     PlaybackSourceListResponse,
     PlaybackSourceOption,
@@ -130,6 +137,9 @@ __all__ = [
     "ActorSyncSubmission",
     "ActorUpdateRequest",
     "ActorUserTagsRequest",
+    "BrowserBackendItemResponse",
+    "BrowserBackendReportResponse",
+    "BrowserInstanceResponse",
     "CleanupSubmission",
     "CommentCreateRequest",
     "CommentResponse",

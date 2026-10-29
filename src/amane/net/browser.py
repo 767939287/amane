@@ -19,6 +19,7 @@ from urllib.parse import unquote, urlsplit
 import structlog
 
 from ..enums import BrowserBackendName, SolverProtocol
+from .bsk import BskBackend
 from .errors import FailureKind, FailureReason, RequestError, RequestFailure, classify_block
 from .recording import skip_body_recording
 
@@ -98,6 +99,7 @@ class BrowserPool:
         solver_protocol: SolverProtocol = SolverProtocol.FLARESOLVERR,
         bypass_proxy: str | None = None,
         trusted_hosts: Sequence[str] = (),
+        bsk_path: str | None = None,
     ) -> None:
         self._default = default_backend
         self._solver_url = solver_url
@@ -107,6 +109,7 @@ class BrowserPool:
         self._proxy = proxy
         self._web = web_client
         self._timeout_ms = timeout_ms
+        self._bsk_path = bsk_path
         self._instances: dict[BrowserBackendName, BrowserBackend] = {}
         self._closed = False
 
@@ -155,6 +158,10 @@ class BrowserPool:
                 return PatchrightBackend(proxy=self._proxy, default_timeout=self._timeout_ms)
             case BrowserBackendName.CAMOUFOX:
                 return CamoufoxBackend(proxy=self._proxy, default_timeout=self._timeout_ms)
+            case BrowserBackendName.BSK:
+                if self._proxy:
+                    logger.warning("bsk backend ignores global proxy", proxy=self._proxy)
+                return BskBackend(bsk_path=self._bsk_path, default_timeout=self._timeout_ms)
             case BrowserBackendName.SOLVER:
                 return SolverBackend(
                     web_provider=lambda: self._web,

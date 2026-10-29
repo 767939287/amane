@@ -6,7 +6,7 @@
 - 派发始终以「已批准」的上下文执行, 审批只对内置助理生效 (界面能真的等用户点击);
 - 依赖里的会话为空, 交付的查询预设因此与会话解耦并直接保留.
 
-工具名即对外契约, 见 docs/dev/agent.md.
+目录与派发端点是稳定面, 工具集随实例与版本变化, 见 docs/dev/agent.md.
 """
 
 from __future__ import annotations
@@ -18,14 +18,8 @@ from pydantic_ai import RunContext
 from pydantic_ai.capabilities import Capability
 from pydantic_ai.toolsets import FunctionToolset
 
-from .actor_ops import build_actor_ops_capability
-from .facet_identity import build_facet_identity_capability
-from .feed_ops import build_feed_ops_capability
-from .library_ops import build_library_ops_capability
-from .metadata_ops import build_metadata_ops_capability
-from .schedule_ops import build_schedule_ops_capability
+from .capabilities import build_capabilities
 from .signature import signature, summary
-from .task_ops import build_task_ops_capability
 from .tools import AgentDeps, build_explore_toolset
 
 EXPLORE_GROUP = "explore"
@@ -60,18 +54,6 @@ class ToolCallContext:
     """默认未批准: 只有派发层显式置真, 避免其它调用点无意绕过闸门."""
 
 
-def build_capabilities() -> list[Capability[AgentDeps]]:
-    return [
-        build_metadata_ops_capability(),
-        build_actor_ops_capability(),
-        build_facet_identity_capability(),
-        build_library_ops_capability(),
-        build_feed_ops_capability(),
-        build_schedule_ops_capability(),
-        build_task_ops_capability(),
-    ]
-
-
 def _capability_toolset(cap: Capability[AgentDeps]) -> FunctionToolset[AgentDeps]:
     toolset = cap.get_toolset()
     if not isinstance(toolset, FunctionToolset):
@@ -86,7 +68,7 @@ def _capability_group(cap: Capability[AgentDeps]) -> str:
 def build_registry() -> dict[str, ToolSpec]:
     """按工具名索引全部可派发工具.
 
-    名字冲突即装配错误: 名字是对外契约, 不允许两个工具共用.
+    名字冲突即装配错误: 派发按名字寻址, 不允许两个工具共用.
     """
     sources: list[tuple[str, FunctionToolset[AgentDeps]]] = [
         (_capability_group(cap), _capability_toolset(cap)) for cap in build_capabilities()
